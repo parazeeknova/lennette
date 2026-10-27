@@ -73,6 +73,6 @@ in
       categories = [ "Utility" ];
     };
     xdg.dataFile."icons/hicolor/512x512/apps/dev.lennette.overlay.png".source =
-      ../../src/assets/lennette_app_icon.png;
+      ./assets/lennette_app_icon.png;
   };
 }

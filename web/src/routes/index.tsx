@@ -49,8 +49,9 @@ const Hero = () => (
       </h1>
 
       <p className="mt-8 max-w-xl text-lg leading-relaxed text-on-sky text-sky-shadow">
-        Lennette is an AI meeting copilot for Windows and Linux. It follows the
-        live transcript and uses your context to suggest what to say next.
+        Lennette is an AI meeting copilot for Windows, Linux, and macOS. It
+        follows the live transcript and uses your context to suggest what to say
+        next.
       </p>
       <PlatformDownload />
 

@@ -5,7 +5,14 @@ version = "0.18.24"
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
-authors = ["lennette contributors"]
+authors = ["Singularity Works"]
+homepage = "https://itssingularity.com"
+
+# Shared installed-app identity. Cargo's crate/binary name remains `lennette`.
+[package.metadata.lennette]
+identifier = "com.itssingularity.lennette"
+name = "Lennette"
+publisher = "Singularity Works"
 
 [workspace]
 members = ["tools"]
@@ -48,6 +55,10 @@ x11rb = { version = "0.13.2", features = ["allow-unsafe-code"] }
 ksni = { version = "0.3.7", features = ["blocking"] }
 zbus = "5.19"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
+libc = "0.2.191"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 gpui = { version = "0.2.2", default-features = false, features = ["windows-manifest"] }
 windows-sys = { version = "0.61.2", features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Console", "Win32_System_LibraryLoader", "Win32_System_Time", "Win32_System_SystemInformation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_Controls"] }
@@ -59,6 +70,8 @@ strip = true
 
 [build-dependencies]
 embed-resource = "3.0.12"
+cc = "1"
+toml_edit = "0.25"
 
 [profile.dev]
 debug = 0
@@ -68,3 +81,7 @@ incremental = true
 [patch.crates-io]
 xattr = { path = "vendor/xattr" }
 proc-macro-error2 = { path = "vendor/proc-macro-error2" }
+
+[[test]]
+name = "macos_text"
+harness = false

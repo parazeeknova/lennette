@@ -98,6 +98,14 @@ pub fn capture_monitor(index: Option<usize>) -> Result<RgbaImage, ScreenError> {
         .into_iter()
         .nth(chosen)
         .ok_or(ScreenError::NoMonitors)?;
+    #[cfg(target_os = "macos")]
+    if let Some(result) = crate::platform::macos::screenshot(
+        monitor
+            .id()
+            .map_err(|error| ScreenError::Capture(error.to_string()))?,
+    ) {
+        return result.map_err(ScreenError::Capture);
+    }
     monitor
         .capture_image()
         .map_err(|error| ScreenError::Capture(error.to_string()))

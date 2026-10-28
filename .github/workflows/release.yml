@@ -4,6 +4,7 @@ on:
   # A merged PR pushes to main too; no second merge event is needed.
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -51,6 +52,12 @@ jobs:
           - platform: windows-x86_64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
+          - platform: macos-aarch64
+            runner: macos-15
+            target: aarch64-apple-darwin
+          - platform: macos-x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
@@ -95,10 +102,19 @@ jobs:
         run: cargo test --locked --workspace --all-targets --target ${{ matrix.target }}
       - name: Build release
         run: cargo build --locked --release --bin lennette --target ${{ matrix.target }}
+      - name: Verify Linux application identity
+        if: runner.os == 'Linux'
+        run: python3 scripts/check-app-identity.py target/${{ matrix.target }}/release/lennette
       - name: Verify Windows native windows and shortcuts
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/windows-smoke.ps1 -Binary target/${{ matrix.target }}/release/lennette.exe
+      - name: Verify macOS native windows and shortcuts
+        if: runner.os == 'macOS'
+        run: bash scripts/macos-smoke.sh target/${{ matrix.target }}/release/lennette
+      - name: Package macOS application
+        if: runner.os == 'macOS'
+        run: bash scripts/build-macos-app.sh target/${{ matrix.target }}/release/lennette ${{ matrix.platform }}
       - name: Package Linux
         if: runner.os == 'Linux'
         shell: bash
@@ -106,7 +122,7 @@ jobs:
           mkdir -p dist/lennette-linux-x86_64
           cp target/${{ matrix.target }}/release/lennette dist/lennette-linux-x86_64/
           cp .github/README.md dist/lennette-linux-x86_64/README.md
-          cp packaging/dev.lennette.overlay.desktop dist/lennette-linux-x86_64/
+          cp packaging/com.itssingularity.lennette.desktop dist/lennette-linux-x86_64/
           if [ -f LICENSE ]; then cp LICENSE dist/lennette-linux-x86_64/; fi
           cp src/assets/lennette_app_icon.png dist/lennette-linux-x86_64/
           { rustc --version; ldd --version | sed -n '1p'; printf 'Commit: %s\n' "$GITHUB_SHA"; } > dist/lennette-linux-x86_64/BUILDINFO.txt
@@ -151,7 +167,11 @@ jobs:
         shell: bash
         run: |
           cd dist
-          sha256sum -- * > SHA256SUMS-${{ matrix.platform }}.txt
+          if [ "$RUNNER_OS" = macOS ]; then
+            shasum -a 256 -- * > SHA256SUMS-${{ matrix.platform }}.txt
+          else
+            sha256sum -- * > SHA256SUMS-${{ matrix.platform }}.txt
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.platform }}
@@ -162,10 +182,10 @@ jobs:
           compression-level: 0
 
   release:
-    name: Publish both platforms
+    name: Publish desktop platforms
     needs: build
     # Manual runs from feature branches can validate builds but cannot publish.
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

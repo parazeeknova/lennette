@@ -11,6 +11,25 @@ use crate::features::db::Database;
 use crate::features::overlay::Overlay;
 use crate::features::vault::Vault;
 
+#[cfg(target_os = "macos")]
+gpui::actions!(lennette_macos, [ShowApp, QuitApp]);
+
+#[cfg(target_os = "macos")]
+fn macos_overlay_action(cx: &mut App, quit: bool) {
+    for handle in cx.windows() {
+        if let Some(overlay) = handle.downcast::<Overlay>() {
+            let _ = overlay.update(cx, |view, _, cx| {
+                if quit {
+                    view.request_quit(cx);
+                } else {
+                    view.show_window(cx);
+                }
+            });
+            break;
+        }
+    }
+}
+
 const OVERLAY_WIDTH: f32 = 720.0;
 const OVERLAY_HEIGHT: f32 = 620.0;
 const DASHBOARD_WIDTH: f32 = 1100.0;
@@ -79,9 +98,7 @@ impl Services {
 }
 
 fn default_database_path() -> Option<std::path::PathBuf> {
-    let directory = directories::ProjectDirs::from("dev", "lennette", "lennette")?
-        .data_dir()
-        .to_path_buf();
+    let directory = crate::identity::data_dir()?;
     std::fs::create_dir_all(&directory).ok()?;
     Some(directory.join("lennette.db"))
 }
@@ -151,9 +168,26 @@ pub fn run() {
         "starting lennette"
     );
 
-    Application::new()
+    let application = Application::new();
+    #[cfg(target_os = "macos")]
+    application.on_reopen(|cx| macos_overlay_action(cx, false));
+    application
         .with_assets(EmbeddedAssets)
         .run(move |cx: &mut App| {
+            #[cfg(target_os = "macos")]
+            {
+                cx.on_action(|_: &ShowApp, cx| macos_overlay_action(cx, false));
+                cx.on_action(|_: &QuitApp, cx| macos_overlay_action(cx, true));
+                cx.bind_keys([gpui::KeyBinding::new("cmd-q", QuitApp, None)]);
+                cx.set_menus(vec![gpui::Menu {
+                    name: "Lennette".into(),
+                    items: vec![
+                        gpui::MenuItem::action("Show Lennette", ShowApp),
+                        gpui::MenuItem::separator(),
+                        gpui::MenuItem::action("Quit Lennette…", QuitApp),
+                    ],
+                }]);
+            }
             tracing::info!(
                 elapsed_ms = startup.elapsed().as_millis(),
                 "native platform ready"
@@ -176,15 +210,15 @@ pub fn run() {
             let services_for_overlay = services.clone();
             let bounds = Bounds::centered(None, size(px(OVERLAY_WIDTH), px(OVERLAY_HEIGHT)), cx);
             let overlay_options = WindowOptions {
-                show: !cfg!(windows),
-                app_id: Some("dev.lennette.overlay".into()),
+                show: !cfg!(any(windows, target_os = "macos")),
+                app_id: Some(crate::identity::APP_ID.into()),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(680.0), px(420.0))),
                 // A transparent window lets the opacity control show the desktop
                 // through the overlay instead of only fading toward black.
                 window_background: gpui::WindowBackgroundAppearance::Transparent,
                 titlebar: Some(TitlebarOptions {
-                    title: Some("lennette".into()),
+                    title: Some(crate::identity::NAME.into()),
                     appears_transparent: true,
                     ..Default::default()
                 }),
@@ -273,8 +307,8 @@ pub fn run() {
             let bind_portal = pure_wayland && !crate::features::hyprland::is_hyprland();
             let control_handle = control.ok().map(std::sync::Arc::new);
             cx.open_window(overlay_options, move |window, cx| {
-                window.set_window_title("lennette");
-                window.set_app_id("dev.lennette.overlay");
+                window.set_window_title(crate::identity::NAME);
+                window.set_app_id(crate::identity::APP_ID);
                 let protected = crate::platform::window::protect_from_capture(window);
                 #[cfg(windows)]
                 if protected.is_ok() {
@@ -363,13 +397,13 @@ pub fn open_dashboard_at(
     }
     let bounds = Bounds::centered(None, size(px(DASHBOARD_WIDTH), px(DASHBOARD_HEIGHT)), cx);
     let options = WindowOptions {
-        show: !cfg!(windows),
-        app_id: Some("dev.lennette.overlay".into()),
+        show: !cfg!(any(windows, target_os = "macos")),
+        app_id: Some(crate::identity::APP_ID.into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(960.0), px(540.0))),
         window_background: gpui::WindowBackgroundAppearance::Transparent,
         titlebar: Some(TitlebarOptions {
-            title: Some("lennette dashboard".into()),
+            title: Some("Lennette Dashboard".into()),
             appears_transparent: true,
             ..Default::default()
         }),
@@ -377,11 +411,15 @@ pub fn open_dashboard_at(
     };
 
     if let Err(error) = cx.open_window(options, move |window, cx| {
-        window.set_window_title("lennette dashboard");
+        window.set_window_title("Lennette Dashboard");
         let protected = crate::platform::window::protect_from_capture(window);
         #[cfg(windows)]
         if protected.is_ok() {
             crate::platform::window::set_visible(window, true);
+            window.activate_window();
+        }
+        #[cfg(target_os = "macos")]
+        if protected.is_ok() {
             window.activate_window();
         }
         if let Err(error) = protected {

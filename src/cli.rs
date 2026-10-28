@@ -22,6 +22,7 @@ pub fn handle_args() -> Option<String> {
         "--screenshot" => "screenshot",
         "--privacy" => "privacy-mode",
         "--normal" => "normal-mode",
+        "--app-info" => return Some(crate::identity::info().to_string()),
         "--version" | "-V" => return Some(format!("lennette {}", env!("CARGO_PKG_VERSION"))),
         "--help" | "-h" => {
             return Some(usage());
@@ -62,6 +63,7 @@ fn usage() -> String {
         "  --toggle-voice          start or stop listening",
         "  --screenshot            capture the screen",
         "  --version               print the version",
+        "  --app-info              print shared application metadata as JSON",
         "  --help                  print this help",
         "",
         "Run without a flag to launch the app.",
@@ -140,13 +142,27 @@ pub fn instance_lock_path() -> Option<std::path::PathBuf> {
 }
 
 fn runtime_path(name: &str) -> Option<std::path::PathBuf> {
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)?;
+    // macOS has no XDG_RUNTIME_DIR. Its per-user temporary directory also
+    // keeps Unix socket paths below Darwin's 104-byte sockaddr_un limit.
+    #[cfg(target_os = "macos")]
+    let runtime = std::env::temp_dir().join("lennette");
     #[cfg(windows)]
-    let runtime = directories::ProjectDirs::from("dev", "lennette", "lennette")?
+    let runtime = directories::ProjectDirs::from("com", "itssingularity", "lennette")?
         .data_local_dir()
         .join("runtime");
     std::fs::create_dir_all(&runtime).ok()?;
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let metadata = std::fs::symlink_metadata(&runtime).ok()?;
+        // Never follow a substituted runtime directory or use another user's.
+        if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
+            return None;
+        }
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).ok()?;
+    }
     Some(runtime.join(name))
 }
 
@@ -193,7 +209,7 @@ fn send(command: &str) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
 
-    let path = control_socket().ok_or("XDG_RUNTIME_DIR is not set")?;
+    let path = control_socket().ok_or("No per-user runtime directory is available")?;
     let mut stream = UnixStream::connect(&path)
         .map_err(|_| "no running lennette instance was found".to_owned())?;
     let payload = if command.ends_with('\n') {

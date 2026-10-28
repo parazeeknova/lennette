@@ -11,13 +11,19 @@ use std::{
 };
 
 const BANNER: &str = "https://swr2.itssingularity.com/lennette/github_release_banner_lennette.png";
-const ASSETS: [&str; 6] = [
+const ASSETS: [&str; 12] = [
     "lennette-linux-x86_64.tar.gz",
     "lennette-windows-x86_64.exe",
     "lennette-windows-x86_64.zip",
     "lennette-windows-x86_64-setup.exe",
+    "lennette-macos-aarch64.zip",
+    "lennette-macos-aarch64.dmg",
+    "lennette-macos-x86_64.zip",
+    "lennette-macos-x86_64.dmg",
     "SHA256SUMS-linux-x86_64.txt",
     "SHA256SUMS-windows-x86_64.txt",
+    "SHA256SUMS-macos-aarch64.txt",
+    "SHA256SUMS-macos-x86_64.txt",
 ];
 
 pub(crate) fn hash(path: &Path) -> Result<String> {
@@ -58,7 +64,7 @@ fn validate_assets(directory: &Path) -> Result<()> {
         actual.difference(&expected)
     );
     let mut verified = BTreeSet::new();
-    for sums in &ASSETS[4..] {
+    for sums in &ASSETS[8..] {
         for line in fs::read_to_string(directory.join(sums))?.lines() {
             let (digest, name) = line
                 .split_once(char::is_whitespace)
@@ -68,7 +74,7 @@ fn validate_assets(directory: &Path) -> Result<()> {
                 .strip_prefix('*')
                 .unwrap_or(name.trim_start());
             ensure!(
-                ASSETS[..4].contains(&name),
+                ASSETS[..8].contains(&name),
                 "Unexpected checksum entry: {name}"
             );
             ensure!(
@@ -81,7 +87,7 @@ fn validate_assets(directory: &Path) -> Result<()> {
             );
         }
     }
-    ensure!(verified.len() == 4, "Checksum coverage is incomplete");
+    ensure!(verified.len() == 8, "Checksum coverage is incomplete");
     Ok(())
 }
 
@@ -135,12 +141,16 @@ fn release_body(config: &Config, tag: &str, notes: &str) -> String {
     format!(
         r#"![Lennette]({BANNER})
 
-Native meeting and interview copilot for Linux and Windows.
+Native meeting and interview copilot for Linux, Windows, and macOS.
 
 | Platform | Download |
 | --- | --- |
 | Linux x86_64 | [Archive]({base}/lennette-linux-x86_64.tar.gz) |
 | Windows x86_64 | [Setup installer]({base}/lennette-windows-x86_64-setup.exe) · [Portable EXE]({base}/lennette-windows-x86_64.exe) · [ZIP]({base}/lennette-windows-x86_64.zip) |
+| macOS Apple Silicon (13+) | [DMG]({base}/lennette-macos-aarch64.dmg) · [App ZIP]({base}/lennette-macos-aarch64.zip) |
+| macOS Intel (13+) | [DMG]({base}/lennette-macos-x86_64.dmg) · [App ZIP]({base}/lennette-macos-x86_64.zip) |
+
+On macOS, open the DMG and drag Lennette.app to Applications (or extract the alternative ZIP). These builds are ad-hoc signed, not notarized; see the [macOS setup and permissions guide](https://github.com/{repo}/blob/{sha}/.github/README.md#macos).
 
 Extract the Linux archive and run `./lennette`, or use the Windows setup wizard (no admin rights required). The portable EXE also runs directly.
 Add chat and speech provider keys in **Settings → AI & Keys**.
@@ -150,6 +160,8 @@ features, shortcuts, and the optional patched Hyprland setup.
 Windows privately launches with the tray off and excludes its overlay/dashboard from
 full-desktop capture paths that honor Windows display affinity (Windows 10 2004+ / Windows 11).
 Linux capture protection requires the patched Hyprland session and private launcher.
+macOS provides best-effort legacy window protection; full-display sharing can include Lennette.
+Share a specific application window and verify what the receiver sees.
 Capture exclusion is not a guarantee of universal undetectability; verify your actual share mode.
 SHA-256 checksum files accompany the downloads. Commit: `{sha}`.
 
@@ -412,10 +424,15 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let dist = temp.path().join("dist");
         fs::create_dir(&dist).unwrap();
-        for name in &ASSETS[..4] {
+        for name in &ASSETS[..8] {
             fs::write(dist.join(name), name).unwrap();
         }
-        for (manifest, names) in [(ASSETS[4], &ASSETS[..1]), (ASSETS[5], &ASSETS[1..4])] {
+        for (manifest, names) in [
+            (ASSETS[8], &ASSETS[..1]),
+            (ASSETS[9], &ASSETS[1..4]),
+            (ASSETS[10], &ASSETS[4..6]),
+            (ASSETS[11], &ASSETS[6..8]),
+        ] {
             fs::write(
                 dist.join(manifest),
                 names
@@ -470,7 +487,7 @@ mod tests {
         let body = &github.inputs[0];
         assert!(body.starts_with(&format!("![Lennette]({BANNER})")));
         assert!(body.contains(&format!("/blob/{}/.github/README.md", config.sha)));
-        for name in &ASSETS[..4] {
+        for name in &ASSETS[..8] {
             assert!(body.contains(&format!(
                 "/releases/download/v0.10.0-build.42.aaaaaaa/{name}"
             )));
@@ -492,11 +509,11 @@ mod tests {
                 "damaged" => fs::write(dist.join(ASSETS[1]), b"damaged").unwrap(),
                 "missing" => fs::remove_file(dist.join(ASSETS[0])).unwrap(),
                 "extra" => fs::write(dist.join("extra"), b"").unwrap(),
-                "coverage" => fs::write(dist.join(ASSETS[5]), b"").unwrap(),
-                "traversal" => fs::write(dist.join(ASSETS[5]), "abc  ../outside\n").unwrap(),
+                "coverage" => fs::write(dist.join(ASSETS[9]), b"").unwrap(),
+                "traversal" => fs::write(dist.join(ASSETS[9]), "abc  ../outside\n").unwrap(),
                 _ => fs::write(
-                    dist.join(ASSETS[5]),
-                    fs::read(dist.join(ASSETS[4])).unwrap(),
+                    dist.join(ASSETS[9]),
+                    fs::read(dist.join(ASSETS[8])).unwrap(),
                 )
                 .unwrap(),
             }

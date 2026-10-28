@@ -71,6 +71,8 @@ pub struct Binding {
     pub action: Action,
     pub display: String,
     pub ctrl: bool,
+    /// Command on macOS; aliases Control on the existing desktop backends.
+    pub command: bool,
     pub shift: bool,
     pub alt: bool,
     /// Key name in the form the X11 layer maps, e.g. `d`, `backslash`, `f1`.
@@ -93,9 +95,10 @@ impl Binding {
         .collect()
     }
 
-    /// Parse `ctrl+shift+d`. `cmd`/`super` are treated as ctrl on Linux.
+    /// Parse `ctrl+shift+d`. Command stays distinct on macOS.
     pub fn parse(action: Action, spec: &str) -> Result<Binding, String> {
         let mut ctrl = false;
+        let mut command = false;
         let mut shift = false;
         let mut alt = false;
         let mut key: Option<String> = None;
@@ -105,7 +108,14 @@ impl Binding {
                 continue;
             }
             match part.as_str() {
-                "ctrl" | "control" | "cmd" | "command" | "meta" | "super" => ctrl = true,
+                "ctrl" | "control" => ctrl = true,
+                "cmd" | "command" | "meta" | "super" => {
+                    if cfg!(target_os = "macos") {
+                        command = true;
+                    } else {
+                        ctrl = true;
+                    }
+                }
                 "shift" => shift = true,
                 "alt" | "option" => alt = true,
                 other => {
@@ -117,7 +127,7 @@ impl Binding {
         }
 
         let key = key.ok_or_else(|| format!("'{spec}' has no main key"))?;
-        if !ctrl && !shift && !alt {
+        if !ctrl && !command && !shift && !alt {
             return Err(format!("'{spec}' needs at least one modifier"));
         }
         let valid = key.len() == 1 && key.chars().all(|c| c.is_ascii_alphanumeric())
@@ -130,8 +140,9 @@ impl Binding {
 
         Ok(Binding {
             action,
-            display: format_display(ctrl, shift, alt, &key),
+            display: format_display(ctrl, command, shift, alt, &key),
             ctrl,
+            command,
             shift,
             alt,
             key,
@@ -144,10 +155,13 @@ impl Binding {
     }
 }
 
-fn format_display(ctrl: bool, shift: bool, alt: bool, key: &str) -> String {
+fn format_display(ctrl: bool, command: bool, shift: bool, alt: bool, key: &str) -> String {
     let mut parts = Vec::new();
     if ctrl {
         parts.push("Ctrl");
+    }
+    if command {
+        parts.push("Cmd");
     }
     if shift {
         parts.push("Shift");
@@ -167,6 +181,12 @@ fn format_display(ctrl: bool, shift: bool, alt: bool, key: &str) -> String {
 
 /// Whether global shortcuts can work in this session.
 pub fn support() -> (bool, &'static str) {
+    if cfg!(target_os = "macos") {
+        return (
+            true,
+            "Global shortcuts use native macOS hotkeys (Control and Command are distinct).",
+        );
+    }
     if cfg!(windows) {
         return (true, "Global shortcuts use Windows hotkeys.");
     }
@@ -190,6 +210,8 @@ pub fn support() -> (bool, &'static str) {
 /// A running global shortcut listener.
 pub struct ShortcutListener {
     events: std_mpsc::Receiver<Action>,
+    #[cfg(target_os = "macos")]
+    macos: macos::Hotkeys,
     stop: Option<std_mpsc::Sender<()>>,
     worker: Option<thread::JoinHandle<()>>,
 }
@@ -233,21 +255,48 @@ impl ShortcutListener {
         }
     }
 
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    pub fn start(bindings: &[Binding]) -> Result<(Self, Vec<String>), String> {
+        let (macos, failed) = macos::Hotkeys::start(bindings)?;
+        let (_, events) = std_mpsc::channel();
+        Ok((
+            Self {
+                events,
+                stop: None,
+                worker: None,
+                macos,
+            },
+            failed,
+        ))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     pub fn start(_bindings: &[Binding]) -> Result<(Self, Vec<String>), String> {
         Err("global shortcuts are not implemented on this platform yet".to_owned())
     }
 
     /// Blocking receive with a timeout, for polling from a UI frame.
     pub fn next_action(&self, timeout: std::time::Duration) -> Option<Action> {
+        #[cfg(target_os = "macos")]
+        if let Some(action) = self.macos.try_action() {
+            return Some(action);
+        }
         self.events.recv_timeout(timeout).ok()
     }
 
     /// Non-blocking receive.
     pub fn try_action(&self) -> Option<Action> {
+        #[cfg(target_os = "macos")]
+        if let Some(action) = self.macos.try_action() {
+            return Some(action);
+        }
         self.events.try_recv().ok()
     }
 }
+
+#[cfg(target_os = "macos")]
+#[path = "macos.rs"]
+mod macos;
 
 #[cfg(windows)]
 #[path = "windows.rs"]
@@ -459,10 +508,15 @@ mod tests {
     }
 
     #[test]
-    fn cmd_is_treated_as_ctrl() {
+    fn command_alias_follows_the_platform() {
         let binding = Binding::parse(Action::Screenshot, "cmd+shift+s").unwrap();
-        assert!(binding.ctrl);
-        assert_eq!(binding.display, "Ctrl+Shift+S");
+        if cfg!(target_os = "macos") {
+            assert!(binding.command && !binding.ctrl);
+            assert_eq!(binding.display, "Cmd+Shift+S");
+        } else {
+            assert!(binding.ctrl && !binding.command);
+            assert_eq!(binding.display, "Ctrl+Shift+S");
+        }
     }
 
     #[test]

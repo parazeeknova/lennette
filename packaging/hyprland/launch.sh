@@ -12,9 +12,9 @@ if ! socket=$(hyprctl instances -j | jq -er --arg instance "$HYPRLAND_INSTANCE_S
     echo 'Lennette was not opened: Wayland display and Hyprland instance do not match.' >&2
     exit 1
 fi
-rule='hl.window_rule({name="lennette-private-overlay",match={class=[[^(dev\.lennette\.overlay|lennette)$]]},float=true,pin=true,border_size=0,rounding=0,no_blur=true,no_shadow=true,private_overlay=true})'
-rule+='; hl.window_rule({name="lennette-overlay-size",match={class=[[^dev\.lennette\.overlay$]],title="^lennette$"},size={720,620},center=true})'
-rule+='; hl.window_rule({name="lennette-dashboard-size",match={class=[[^dev\.lennette\.overlay$]],title="^lennette dashboard$"},size={1100,760},center=true})'
+rule='hl.window_rule({name="lennette-private-overlay",match={class=[[^(com\.itssingularity\.lennette|lennette)$]]},float=true,pin=true,border_size=0,rounding=0,no_blur=true,no_shadow=true,private_overlay=true})'
+rule+='; hl.window_rule({name="lennette-overlay-size",match={class=[[^com\.itssingularity\.lennette$]],title="^Lennette$"},size={720,620},center=true})'
+rule+='; hl.window_rule({name="lennette-dashboard-size",match={class=[[^com\.itssingularity\.lennette$]],title="^Lennette Dashboard$"},size={1100,760},center=true})'
 if ! response=$(hyprctl eval "$rule" 2>&1) || [[ "$response" != 'ok' ]]; then
     echo "Lennette was not opened: the compositor could not enforce private_overlay: $response" >&2
     exit 1

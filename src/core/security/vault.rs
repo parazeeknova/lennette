@@ -55,15 +55,12 @@ impl Vault {
 
     /// Open the vault in the platform's user data directory.
     pub fn open_default() -> Result<Self, VaultError> {
-        let base = directories::ProjectDirs::from("dev", "lennette", "lennette")
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "no user data directory available",
-                )
-            })?
-            .data_dir()
-            .to_path_buf();
+        let base = crate::identity::data_dir().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no user data directory available",
+            )
+        })?;
         Self::open(base)
     }
 

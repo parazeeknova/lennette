@@ -53,7 +53,15 @@ describe("Public page SEO", () => {
     );
     expect(application).not.toHaveProperty("aggregateRating");
     expect(application.downloadUrl).toBe(`${SITE_URL}/downloads`);
-    expect(application.operatingSystem).not.toContain("macOS");
+    expect(application.operatingSystem).toContain("macOS 13 or later");
+    expect(application.description).toBe(
+      "An ambient real-time meeting and discussion copilot"
+    );
+    const publisher = graph.find(
+      (node: Record<string, unknown>) => node["@type"] === "Organization"
+    );
+    expect(publisher.name).toBe("Singularity Works");
+    expect(publisher.url).toBe("https://itssingularity.com");
   });
 
   it("uses the displayed FAQ answers and keeps breadcrumb URLs canonical", () => {

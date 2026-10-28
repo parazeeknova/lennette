@@ -50,7 +50,14 @@ impl Tray {
                 Err(error) => Tray::Unavailable(error),
             }
         }
-        #[cfg(not(any(target_os = "linux", windows)))]
+        #[cfg(target_os = "macos")]
+        {
+            match macos_tray::start() {
+                Ok(backend) => Tray::Live(Box::new(backend)),
+                Err(error) => Tray::Unavailable(error),
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             Tray::Unavailable("the tray is not implemented on this platform yet".to_owned())
         }
@@ -82,6 +89,7 @@ impl Tray {
 /// Render the mark at one size, in RGBA.
 ///
 /// Reuse the user's app artwork in both the Windows and Linux trays.
+#[cfg(any(target_os = "linux", windows, test))]
 fn icon_at(size: u32) -> Vec<u8> {
     static ARTWORK: std::sync::OnceLock<image::RgbaImage> = std::sync::OnceLock::new();
     let artwork = ARTWORK.get_or_init(|| {
@@ -125,11 +133,11 @@ mod ksni_tray {
 
     impl ksni::Tray for Item {
         fn id(&self) -> String {
-            "dev.lennette.overlay".into()
+            "com.itssingularity.lennette".into()
         }
 
         fn title(&self) -> String {
-            "lennette".into()
+            crate::identity::NAME.into()
         }
 
         fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -147,7 +155,7 @@ mod ksni_tray {
 
         fn icon_name(&self) -> String {
             // A themed name gives the panel a fallback if pixmaps are ignored.
-            "lennette".into()
+            crate::identity::NAME.into()
         }
 
         fn status(&self) -> ksni::Status {
@@ -292,3 +300,7 @@ mod tests {
         let _ = tray.poll();
     }
 }
+
+#[cfg(target_os = "macos")]
+#[path = "tray_macos.rs"]
+mod macos_tray;

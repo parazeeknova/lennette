@@ -163,7 +163,7 @@ fn keyboard(h: &mut Harness, clients: &Path, app_pid: u32) -> Result<()> {
     clean(h, clients, "dashboard-shortcut", "wlr", "shm", "HEADLESS-1")?;
     for w in h.clients()?.iter().filter(|w| w["pid"] == app_pid) {
         ensure!(
-            (w["class"] == "dev.lennette.overlay" || w["class"] == "lennette")
+            (w["class"] == "com.itssingularity.lennette" || w["class"] == "lennette")
                 && w["floating"] == true
                 && w["pinned"] == true,
             "Unprotected app window: {w}"
@@ -322,10 +322,10 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
             h.wait("ordinary first-launch window", 60, |h| {
                 Ok(h.clients()?
                     .iter()
-                    .any(|w| w["class"] == "dev.lennette.overlay"))
+                    .any(|w| w["class"] == "com.itssingularity.lennette"))
             })?;
             pause(1000);
-            let w = h.window("dev.lennette.overlay")?;
+            let w = h.window("com.itssingularity.lennette")?;
             ensure!(
                 w["floating"] == true && w["pinned"] == true && w["size"] == json!([720, 620]),
                 "Ordinary launch is not floating/pinned with expected size: {w}"
@@ -356,9 +356,9 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
             &json!(h.clients()?),
         )?;
         clean(&mut h, &clients, "baseline", "wlr", "shm", "HEADLESS-1")?;
-        let overlay = h.fixture(&clients, "dev.lennette.overlay", "ff00ff", true)?;
-        move_window(&h, 250, 180, "dev.lennette.overlay")?;
-        let state = h.window("dev.lennette.overlay")?;
+        let overlay = h.fixture(&clients, "com.itssingularity.lennette", "ff00ff", true)?;
+        move_window(&h, 250, 180, "com.itssingularity.lennette")?;
+        let state = h.window("com.itssingularity.lennette")?;
         ensure!(
             state["floating"] == true && state["pinned"] == true,
             "Fixture not floating/pinned: {state}"
@@ -390,7 +390,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
                 "direct-window",
                 "window",
                 "shm",
-                "dev.lennette.overlay"
+                "com.itssingularity.lennette"
             )?
             .count([255, 0, 255])
                 == 0,
@@ -413,12 +413,12 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
         h.checks
             .push(json!({"test":"public pinned window is exported beneath private overlay"}));
         h.dispatch("hl.dsp.focus({monitor=\"HEADLESS-1\"})")?;
-        move_window(&h, 250, 180, "dev.lennette.overlay")?;
+        move_window(&h, 250, 180, "com.itssingularity.lennette")?;
         move_window(&h, 250, 180, "test.public")?;
         h.dispatch("hl.dsp.cursor.move({x=300,y=200})")?;
         h.call("wlrctl", &["pointer", "click"])?;
         h.wait("pointer focuses private overlay", 10, |h| {
-            Ok(h.json(&["-j", "activewindow"])?["class"] == "dev.lennette.overlay")
+            Ok(h.json(&["-j", "activewindow"])?["class"] == "com.itssingularity.lennette")
         })?;
         h.checks
             .push(json!({"test":"pointer hit testing prioritizes private overlay"}));
@@ -436,7 +436,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
         .into_iter()
         .enumerate()
         {
-            move_window(&h, x, y, "dev.lennette.overlay")?;
+            move_window(&h, x, y, "com.itssingularity.lennette")?;
             for output in ["HEADLESS-1", "HEADLESS-2"] {
                 clean(
                     &mut h,
@@ -450,7 +450,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
         }
         h.lua("hl.monitor({output=\"HEADLESS-2\",mode=\"800x600@60\",position=\"960x0\",scale=\"1.25\",transform=1})")?;
         pause(500);
-        move_window(&h, 1000, 100, "dev.lennette.overlay")?;
+        move_window(&h, 1000, 100, "com.itssingularity.lennette")?;
         clean(
             &mut h,
             &clients,
@@ -470,11 +470,11 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
             .to_string();
         h.dispatch("hl.dsp.focus({workspace=\"8\"})")?;
         ensure!(
-            h.window("dev.lennette.overlay")?["pinned"] == true,
+            h.window("com.itssingularity.lennette")?["pinned"] == true,
             "Overlay lost pin on workspace change"
         );
         h.dispatch(&format!("hl.dsp.focus({{workspace={}}})", quote(previous)))?;
-        h.dispatch("hl.dsp.window.set_prop({window=\"class:dev.lennette.overlay\",prop=\"private_overlay\",value=\"0\"})")?;
+        h.dispatch("hl.dsp.window.set_prop({window=\"class:com.itssingularity.lennette\",prop=\"private_overlay\",value=\"0\"})")?;
         let visible = h
             .capture(&clients, "positive-control", "wlr", "shm", "HEADLESS-2")?
             .count([255, 0, 255]);
@@ -482,7 +482,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
             visible > 1000,
             "Positive control failed: {visible} marker pixels"
         );
-        h.dispatch("hl.dsp.window.set_prop({window=\"class:dev.lennette.overlay\",prop=\"private_overlay\",value=\"1\"})")?;
+        h.dispatch("hl.dsp.window.set_prop({window=\"class:com.itssingularity.lennette\",prop=\"private_overlay\",value=\"1\"})")?;
         clean(
             &mut h,
             &clients,
@@ -524,9 +524,9 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
             h.wait("real Lennette window", 30, |h| {
                 Ok(h.clients()?
                     .iter()
-                    .any(|w| w["class"] == "dev.lennette.overlay"))
+                    .any(|w| w["class"] == "com.itssingularity.lennette"))
             })?;
-            move_window(&h, 250, 180, "dev.lennette.overlay")?;
+            move_window(&h, 250, 180, "com.itssingularity.lennette")?;
             clean(
                 &mut h,
                 &clients,
@@ -535,7 +535,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
                 "shm",
                 "HEADLESS-1",
             )?;
-            h.dispatch("hl.dsp.window.set_prop({window=\"class:dev.lennette.overlay\",prop=\"private_overlay\",value=\"0\"})")?;
+            h.dispatch("hl.dsp.window.set_prop({window=\"class:com.itssingularity.lennette\",prop=\"private_overlay\",value=\"0\"})")?;
             let different = h
                 .capture(
                     &clients,
@@ -546,7 +546,7 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
                 )?
                 .unexpected();
             ensure!(different > 1000, "Real app positive control failed");
-            h.dispatch("hl.dsp.window.set_prop({window=\"class:dev.lennette.overlay\",prop=\"private_overlay\",value=\"1\"})")?;
+            h.dispatch("hl.dsp.window.set_prop({window=\"class:com.itssingularity.lennette\",prop=\"private_overlay\",value=\"1\"})")?;
             clean(
                 &mut h,
                 &clients,

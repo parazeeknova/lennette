@@ -99,7 +99,7 @@ pub fn window_rules() -> &'static str {
      \x20   no_shadow = true,\n\
      })\n\
      hl.window_rule({\n\
-     \x20   match = { title = \"lennette\" },\n\
+     \x20   match = { title = \"Lennette\" },\n\
      \x20   float = true,\n\
      \x20   pin = true,\n\
      \x20   border_size = 0,\n\
@@ -108,7 +108,7 @@ pub fn window_rules() -> &'static str {
      \x20   no_shadow = true,\n\
      })\n\
      hl.window_rule({\n\
-     \x20   match = { class = \"dev.lennette.overlay\" },\n\
+     \x20   match = { class = \"com.itssingularity.lennette\" },\n\
      \x20   float = true,\n\
      \x20   pin = true,\n\
      \x20   border_size = 0,\n\
@@ -116,8 +116,8 @@ pub fn window_rules() -> &'static str {
      \x20   no_blur = true,\n\
      \x20   no_shadow = true,\n\
      })\n\
-     hl.window_rule({ match = { class = \"dev.lennette.overlay\", title = \"^lennette$\" }, size = {720, 620}, center = true })\n\
-     hl.window_rule({ match = { class = \"dev.lennette.overlay\", title = \"^lennette dashboard$\" }, size = {1100, 760}, center = true })\n"
+     hl.window_rule({ match = { class = \"com.itssingularity.lennette\", title = \"^Lennette$\" }, size = {720, 620}, center = true })\n\
+     hl.window_rule({ match = { class = \"com.itssingularity.lennette\", title = \"^Lennette Dashboard$\" }, size = {1100, 760}, center = true })\n"
 }
 
 /// Generate the Lua module contents.
@@ -200,7 +200,7 @@ fn apply_expression(expression: &str) -> Result<(), String> {
 /// Keep the protected Nix launcher when repairing the shifted physical key.
 pub fn repair_managed_toggle() -> Result<(), String> {
     apply_expression(
-        r#"hl.window_rule({name="lennette-clear-glass",match={class=[[^(dev\.lennette\.overlay|lennette)$]]},no_blur=true,no_shadow=true})"#,
+        r#"hl.window_rule({name="lennette-clear-glass",match={class=[[^(com\.itssingularity\.lennette|lennette)$]]},no_blur=true,no_shadow=true})"#,
     )?;
     let path = config_directory().ok_or("Hyprland configuration not found")?;
     let text = std::fs::read_to_string(include_path(&path)).map_err(|e| e.to_string())?;
@@ -267,7 +267,7 @@ fn visibility_expression(
         if client["pid"].as_u64() != Some(u64::from(pid))
             || !matches!(
                 client["class"].as_str(),
-                Some("dev.lennette.overlay" | "lennette")
+                Some("com.itssingularity.lennette" | "lennette")
             )
         {
             continue;
@@ -301,7 +301,7 @@ pub fn focus_overlay() {
     // bring_to_top operates on the focused window and takes no selector. Check
     // the reply too: hyprctl can report a Lua error with a successful exit code.
     for expression in [
-        "hl.dispatch(hl.dsp.focus({ window = \"title:^lennette$\" }))",
+        "hl.dispatch(hl.dsp.focus({ window = \"title:^Lennette$\" }))",
         "hl.dispatch(hl.dsp.window.bring_to_top())",
     ] {
         match std::process::Command::new("hyprctl")
@@ -330,9 +330,9 @@ mod tests {
     #[test]
     fn visibility_targets_overlay_and_settings_without_touching_other_windows() {
         let clients = serde_json::json!([
-            {"pid": 42, "class": "dev.lennette.overlay", "title": "lennette", "address": "0x1"},
-            {"pid": 42, "class": "dev.lennette.overlay", "title": "lennette dashboard", "address": "0x2"},
-            {"pid": 99, "class": "dev.lennette.overlay", "address": "0x3"},
+            {"pid": 42, "class": "com.itssingularity.lennette", "title": "Lennette", "address": "0x1"},
+            {"pid": 42, "class": "com.itssingularity.lennette", "title": "Lennette Dashboard", "address": "0x2"},
+            {"pid": 99, "class": "com.itssingularity.lennette", "address": "0x3"},
             {"pid": 42, "class": "unrelated", "address": "0x4"}
         ]);
         for visible in [false, true] {
@@ -394,8 +394,8 @@ mod tests {
         assert!(module.contains("rounding = 0"));
         // Matched both ways: Wayland reports a class, XWayland is matched by title.
         assert!(module.contains("class = \"lennette\""));
-        assert!(module.contains("title = \"lennette\""));
-        assert!(module.contains("class = \"dev.lennette.overlay\""));
+        assert!(module.contains("title = \"Lennette\""));
+        assert!(module.contains("class = \"com.itssingularity.lennette\""));
     }
 
     #[test]

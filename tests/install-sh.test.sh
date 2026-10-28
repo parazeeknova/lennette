@@ -50,8 +50,8 @@ check 'failed install leaves no launcher' test ! -e "$test_home/.local/bin/lenny
 make_release v0.0.0-test
 install_here --no-launch --no-modify-path >"$work/install.log"
 check 'lenny is executable' test -x "$test_home/.local/bin/lenny"
-check 'the branded desktop launcher is installed' grep -q 'Icon=dev.lennette.overlay' "$test_home/.local/share/applications/dev.lennette.overlay.desktop"
-check 'desktop icon matches the shipped artwork' cmp "$source_dir/src/assets/lennette_app_icon.png" "$test_home/.local/share/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
+check 'the branded desktop launcher is installed' grep -q 'Icon=com.itssingularity.lennette' "$test_home/.local/share/applications/com.itssingularity.lennette.desktop"
+check 'desktop icon matches the shipped artwork' cmp "$source_dir/src/assets/lennette_app_icon.png" "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
 check 'lennette remains a compatibility alias' test -e "$test_home/.local/bin/lennette"
 check '--no-launch does not open the app' test ! -e "$LENNETTE_TEST_LAUNCH_LOG"
 check '--no-modify-path preserves startup files' test ! -e "$test_home/.bashrc"
@@ -102,7 +102,7 @@ run_launcher uninstall
 check 'uninstall removes lenny' test ! -e "$test_home/.local/bin/lenny"
 check 'uninstall removes its compatibility alias' test ! -L "$test_home/.local/bin/lennette"
 check 'uninstall removes all release payloads' test ! -e "$test_home/.local/share/lennette/versions"
-check 'uninstall removes the desktop entry' test ! -e "$test_home/.local/share/applications/dev.lennette.overlay.desktop"
-check 'uninstall removes its desktop icon' test ! -e "$test_home/.local/share/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
+check 'uninstall removes the desktop entry' test ! -e "$test_home/.local/share/applications/com.itssingularity.lennette.desktop"
+check 'uninstall removes its desktop icon' test ! -e "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
 check 'uninstall keeps settings' test -f "$test_home/.config/lennette/settings"
 echo 'Linux installer: all checks passed'

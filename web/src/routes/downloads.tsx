@@ -41,14 +41,14 @@ const windowsInstall = `irm ${SITE_URL}/install.ps1 | iex`;
 
 export const NativeSetup = () => {
   const detected = usePlatform();
-  const [selected, setSelected] = useState<"linux" | "windows" | null>(null);
-  const platform = selected ?? (detected === "windows" ? "windows" : "linux");
+  const [selected, setSelected] = useState<Platform | null>(null);
+  const platform = selected ?? (detected === "unknown" ? "linux" : detected);
 
   return (
     <div className="mt-6 flex flex-col gap-3">
       <fieldset className="glass relative flex w-fit gap-1 glass-pill p-1">
         <legend className="sr-only">Setup platform</legend>
-        {(["linux", "windows"] as const).map((os) => {
+        {(["linux", "windows", "macos"] as const).map((os) => {
           const Mark = platformMarks[os];
           return (
             <button
@@ -63,34 +63,67 @@ export const NativeSetup = () => {
               }`}
             >
               <Mark className="size-4 shrink-0" />
-              <span>{os === "windows" ? "Windows" : "Linux"}</span>
+              <span>
+                {{ linux: "Linux", windows: "Windows", macos: "macOS" }[os]}
+              </span>
             </button>
           );
         })}
       </fieldset>
-      <Command
-        label={
-          platform === "windows"
-            ? "One-time setup · PowerShell"
-            : "One-time setup · terminal"
-        }
-      >
-        {platform === "windows" ? windowsInstall : unixInstall}
-      </Command>
-      <p className="text-sm leading-relaxed text-ink-soft">
-        Setup opens Lennette right away. On Linux, open a new terminal afterward
-        so it picks up your PATH.
-      </p>
-      <Command label="Every launch after setup · Windows and Linux">
-        lenny
-      </Command>
-      <p className="max-w-2xl text-sm leading-relaxed text-ink-soft">
-        Use <code>lenny update</code> to get the newest release,{" "}
-        <code>lenny doctor</code> to check your installation, or{" "}
-        <code>lenny uninstall</code> to remove the app while keeping your
-        settings and keys. Launches use your local copy, without downloading it
-        again.
-      </p>
+      {platform === "macos" ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm leading-relaxed text-ink-soft">
+            Open the DMG for your Mac and drag Lennette.app to Applications.
+            Allow microphone and screen recording access when prompted. macOS 13
+            or newer is required.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <a
+              className="glass btn-liquid glass-pill"
+              href={assetUrl("lennette-macos-aarch64.dmg")}
+            >
+              Apple Silicon DMG
+            </a>
+            <a
+              className="glass btn-liquid glass-pill"
+              href={assetUrl("lennette-macos-x86_64.dmg")}
+            >
+              Intel DMG
+            </a>
+          </div>
+          <p className="text-sm leading-relaxed text-ink-soft">
+            Builds are ad-hoc signed, not notarized. Full-display sharing may
+            include Lennette. See the macOS card for setup instructions and
+            capture limits.
+          </p>
+        </div>
+      ) : (
+        <>
+          <Command
+            label={
+              platform === "windows"
+                ? "One-time setup · PowerShell"
+                : "One-time setup · terminal"
+            }
+          >
+            {platform === "windows" ? windowsInstall : unixInstall}
+          </Command>
+          <p className="text-sm leading-relaxed text-ink-soft">
+            Setup opens Lennette right away. On Linux, open a new terminal
+            afterward so it picks up your PATH.
+          </p>
+          <Command label="Every launch after setup · Windows and Linux">
+            lenny
+          </Command>
+          <p className="max-w-2xl text-sm leading-relaxed text-ink-soft">
+            Use <code>lenny update</code> to get the newest release,{" "}
+            <code>lenny doctor</code> to check your installation, or{" "}
+            <code>lenny uninstall</code> to remove the app while keeping your
+            settings and keys. Launches use your local copy, without downloading
+            it again.
+          </p>
+        </>
+      )}
     </div>
   );
 };
@@ -130,10 +163,28 @@ const cards: Card[] = [
   {
     platform: "macos",
     name: "macOS",
-    requirement: "Coming soon",
-    status: "Not yet available",
-    body: "Not available yet. Hiding the window from a screen share needs work we have not done on macOS, so there is nothing to download.",
-    pending: true,
+    requirement: "Apple Silicon and Intel",
+    status: "macOS 13 or newer",
+    body: "Native Mac app with global shortcuts, microphone and system audio. Open the DMG and drag Lennette.app to Applications.",
+    caution:
+      "Full-display sharing may include Lennette. Privacy mode hides app icons, but cannot guarantee capture exclusion. Builds are ad-hoc signed and not notarized; see the setup guide for permissions and opening a downloaded app.",
+    releases: [
+      {
+        asset: "lennette-macos-aarch64.dmg",
+        label: "Apple Silicon .dmg",
+        note: "M-series Macs",
+      },
+      {
+        asset: "lennette-macos-x86_64.dmg",
+        label: "Intel .dmg",
+        note: "Intel Macs",
+      },
+    ],
+    secondary: {
+      label: "macOS setup and limits",
+      href: `${GITHUB_URL}/blob/main/.github/README.md#macos`,
+      external: true,
+    },
   },
 ];
 
@@ -167,7 +218,7 @@ const DownloadsPage = () => (
   <PageShell
     breadcrumb="Downloads"
     titleIcon={["Download", "lennette."]}
-    intro="Get the free Lennette desktop app for Windows or Linux. Bring your AI and transcription keys and get help during calls without adding a meeting bot."
+    intro="Get the free Lennette desktop app for Windows, Linux, or macOS. Bring your AI and transcription keys and get help during calls without adding a meeting bot."
   >
     <div className="grid gap-5 md:grid-cols-3">
       {cards.map((card) => (

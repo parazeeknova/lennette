@@ -12,7 +12,7 @@ export const SEO_PAGES = {
     name: "Lennette AI Meeting Copilot",
     title: "Lennette | Live AI Meeting Copilot for Windows & Linux",
     description:
-      "Get live transcription and contextual AI answers during meetings. Lennette is a native Windows and Linux copilot, free with your own provider API keys.",
+      "Get live transcription and contextual AI answers during meetings. Lennette is a native Windows, Linux, and macOS copilot, free with your own provider API keys.",
     type: "WebPage",
   },
   "/pricing": {
@@ -23,9 +23,9 @@ export const SEO_PAGES = {
   },
   "/downloads": {
     name: "Downloads",
-    title: "Download Lennette | AI Meeting Copilot for Windows & Linux",
+    title: "Download Lennette | AI Meeting Copilot for Windows, Linux & macOS",
     description:
-      "Download the free Lennette desktop app for Windows and Linux. Get portable Windows and Linux builds, release checksums, and Hyprland setup instructions.",
+      "Download Lennette for Windows, Linux, or macOS. Get the branded Mac DMG, native desktop builds, release checksums, and platform setup instructions.",
     type: "CollectionPage",
   },
   "/tutorial": {
@@ -58,8 +58,8 @@ export const pageHead = (path: PagePath, faqs: readonly FaqEntry[] = []) => {
     {
       "@type": "Organization",
       "@id": publisherId,
-      name: "Lennette",
-      url: pageUrl("/"),
+      name: "Singularity Works",
+      url: "https://itssingularity.com",
       logo: `${ASSET_URL}/lennette_app_icon.png`,
       sameAs: [GITHUB_URL],
     },
@@ -77,8 +77,8 @@ export const pageHead = (path: PagePath, faqs: readonly FaqEntry[] = []) => {
       name: "Lennette",
       url: pageUrl("/"),
       applicationCategory: "BusinessApplication",
-      operatingSystem: "Windows 10 or later, Linux",
-      description: SEO_PAGES["/"].description,
+      operatingSystem: "Windows 10 or later, Linux, macOS 13 or later",
+      description: "An ambient real-time meeting and discussion copilot",
       image: SOCIAL_IMAGE.url,
       screenshot: `${ASSET_URL}/gmeet.png`,
       downloadUrl: pageUrl("/downloads"),

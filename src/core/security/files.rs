@@ -23,7 +23,7 @@ pub(crate) fn open_private(path: &Path, create_new: bool) -> std::io::Result<Fil
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         options.custom_flags(libc::O_NOFOLLOW);
     }
     let file = options.open(path)?;

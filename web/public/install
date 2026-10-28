@@ -38,7 +38,7 @@ while (($#)); do
     esac
 done
 
-[[ $(uname -s) == Linux ]] || fail 'Use the PowerShell setup command on Windows. macOS is not supported yet.'
+[[ $(uname -s) == Linux ]] || fail 'This installer is for Linux. On macOS use the branded DMG from https://lennette.itssingularity.com/downloads; on Windows use the PowerShell setup.'
 [[ $(uname -m) == x86_64 ]] || fail 'Only Linux x86_64 releases are available.'
 ASSET=lennette-linux-x86_64.tar.gz
 MANIFEST=SHA256SUMS-linux-x86_64.txt
@@ -130,8 +130,8 @@ case ${1:-} in
         if [[ -L $bin/lennette && $(readlink "$bin/lennette") == lenny ]]; then rm -- "$bin/lennette"; fi
         rm -rf -- "${data:?}/versions"
         rm -f -- "$data/launch.log"
-        rm -f -- "$desktop_data/applications/dev.lennette.overlay.desktop"
-        rm -f -- "$desktop_data/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
+        rm -f -- "$desktop_data/applications/com.itssingularity.lennette.desktop"
+        rm -f -- "$desktop_data/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
         rmdir -- "$data" 2>/dev/null || true
         printf '%s\n' 'Lennette removed. Your settings, history, and API keys were kept.'
         exit 0 ;;
@@ -184,7 +184,7 @@ if [[ ! -e $BIN_DIR/lennette || -L $BIN_DIR/lennette ]]; then ln -sfn lenny "$BI
 # Register the launcher and the shipped artwork with Linux desktop shells.
 mkdir -p "$DESKTOP_DATA/applications" "$DESKTOP_DATA/icons/hicolor/512x512/apps"
 if [[ -f $payload/lennette_app_icon.png ]]; then
-    install -m 644 -- "$payload/lennette_app_icon.png" "$DESKTOP_DATA/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
+    install -m 644 -- "$payload/lennette_app_icon.png" "$DESKTOP_DATA/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
 fi
 # Desktop Exec quoting differs from shell quoting: escape reserved characters.
 desktop_exec=${BIN_DIR//\\/\\\\}
@@ -194,9 +194,9 @@ desktop_exec=${desktop_exec//\`/\\\`}
 desktop_exec=${desktop_exec//%/%%}
 {
     printf '[Desktop Entry]\nType=Application\nName=Lennette\n'
-    printf 'Comment=Live meeting copilot\nExec="%s/lenny"\n' "$desktop_exec"
-    printf 'Icon=dev.lennette.overlay\nStartupWMClass=dev.lennette.overlay\nTerminal=false\nCategories=Utility;AudioVideo;\n'
-} >"$DESKTOP_DATA/applications/dev.lennette.overlay.desktop"
+    printf 'Comment=An ambient real-time meeting and discussion copilot\nExec="%s/lenny"\n' "$desktop_exec"
+    printf 'Icon=com.itssingularity.lennette\nStartupWMClass=com.itssingularity.lennette\nTerminal=false\nCategories=Utility;AudioVideo;\nX-Lennette-Publisher=Singularity Works\nX-Lennette-Website=https://itssingularity.com\n'
+} >"$DESKTOP_DATA/applications/com.itssingularity.lennette.desktop"
 if have gtk-update-icon-cache; then gtk-update-icon-cache -f -t "$DESKTOP_DATA/icons/hicolor" >/dev/null 2>&1 || true; fi
 if have update-desktop-database; then update-desktop-database "$DESKTOP_DATA/applications" >/dev/null 2>&1 || true; fi
 

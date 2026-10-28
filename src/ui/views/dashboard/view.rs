@@ -957,8 +957,7 @@ impl DashboardView {
         let directory = self
             .database
             .as_ref()
-            .and_then(|_| directories::ProjectDirs::from("dev", "lennette", "lennette"))
-            .map(|dirs| dirs.data_dir().to_path_buf())
+            .and_then(|_| crate::identity::data_dir())
             .unwrap_or_else(std::env::temp_dir);
         let safe: String = title
             .chars()
@@ -1772,13 +1771,22 @@ impl DashboardView {
                     .line_height(scaled(17.0))
                     .text_color(theme.muted_foreground)
                     .whitespace_normal()
-                    .child("An ambient meeting and discussion copilot."),
+                    .child(crate::identity::DESCRIPTION),
             )
             .child(
                 div()
                     .text_size(scaled(11.0))
                     .text_color(theme.muted_foreground)
                     .child(format!("Version {version}")),
+            )
+            .child(
+                div()
+                    .text_size(scaled(11.0))
+                    .text_color(theme.muted_foreground)
+                    .child(format!(
+                        "{} · itssingularity.com",
+                        crate::identity::PUBLISHER
+                    )),
             );
 
         let identity = div()

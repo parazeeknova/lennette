@@ -1,6 +1,6 @@
 <h1 align="center"><img src="https://swr2.itssingularity.com/lennette/lennette_app_icon.png" width="36" height="36" alt="" /> Lennette</h1>
 
-<p align="center">A native desktop copilot for meetings, interviews, and live discussions.<br />Live transcripts, useful context, and answers when you need them. Built with Rust + GPUI.</p>
+<p align="center">An ambient real-time meeting and discussion copilot.<br />Live transcripts, useful context, and answers when you need them. Built with Rust + GPUI.</p>
 
 
 ### What it does
@@ -67,7 +67,7 @@ Linux needs the release build's glibc version and your distribution's desktop,
 Vulkan, and audio libraries; these are not bundled in the archive. Setup reports
 loader errors, and `lenny doctor` checks missing libraries and a desktop session.
 On NixOS, use the Nix installation below to supply the interpreter and runtime
-libraries. ARM and macOS builds are not available yet.
+libraries. macOS app DMGs and ZIPs are available for Apple Silicon and Intel; see the macOS section below. Linux and Windows ARM builds are not available.
 
 Prefer a plain download? Grab a build from [Releases](https://github.com/parazeeknova/lennette/releases). SHA-256 checksums are included.
 
@@ -78,7 +78,9 @@ when upgraded or removed. This is an alternative to the `lenny` command setup.
 
 ### Screen sharing
 
-**Windows:** the overlay and dashboard use OS capture exclusion, including for full-monitor sharing on capture paths that honor it. They stay visible locally. Private launch is the default, with no tray icon, taskbar entry, or Alt+Tab entry. The new Windows backend still needs real meeting/audio validation; check the receiver's view in your meeting software. [Windows support and limits](https://github.com/parazeeknova/lennette/blob/main/docs/windows.md).
+**Windows:** the overlay and dashboard use OS capture exclusion, including for full-monitor sharing on capture paths that honor it. They stay visible locally. Private launch is the default, with no tray icon, taskbar entry, or Alt+Tab entry. The new Windows backend still needs real meeting/audio validation; check the receiver's view in your meeting software. Native dialogs, notifications, and the tray are outside window capture protection.
+
+**macOS:** legacy window capture protection is best effort. Full-display sharing can include Lennette even in Privacy mode. Share a specific application window and verify the receiver's view. Modern ScreenCaptureKit clients control their own exclusion filters; Lennette cannot force every recorder to omit its windows.
 
 **Linux:** capture exclusion requires the **patched Hyprland compositor** below. Ordinary X11/Wayland launches do not provide it. [Protection boundary](https://github.com/parazeeknova/lennette/blob/main/packaging/hyprland/README.md#protection-boundary).
 
@@ -96,6 +98,53 @@ devenv shell -- just install
 ```
 
 The shell supplies native libraries; installation preserves their Nix runtime paths. Keep `~/.local/bin` on your `PATH`. Without Nix, install the packages in [release.yml](https://github.com/parazeeknova/lennette/blob/main/.github/workflows/release.yml) and use `cargo run --locked`.
+
+### macOS
+
+macOS 13+ on Apple Silicon and Intel is supported. Download the matching app DMG or ZIP
+from [Releases](https://github.com/parazeeknova/lennette/releases), open it, and
+drag `Lennette.app` to Applications. Builds are ad-hoc signed, not notarized.
+Allow Microphone and Screen & System Audio Recording in System Settings.
+
+From source, install Apple's Command Line Tools and Rust, then run
+`cargo run --locked`. To package an app, run `cargo build --locked --release`
+and `bash scripts/build-macos-app.sh`. Full Xcode is not required. The macOS
+GPUI dependency explicitly enables `font-kit`; without it GPUI uses a placeholder
+text backend and launches with blank text. `tests/macos_text.rs` guards this.
+The branded app includes a multi-resolution Finder/Dock icon. Its bundle identity
+is `com.itssingularity.lennette`. The release also includes a branded drag-to-Applications
+DMG; the ZIP is available as an alternative.
+
+System audio uses ScreenCaptureKit (no virtual driver) and captures the system mix,
+excluding Lennette's own output. The selected output device does not filter that mix.
+After changing recording permissions, stop/restart listening and relaunch if macOS asks.
+Screenshots use ScreenCaptureKit with explicit self-exclusion on macOS 14+; Ventura
+retains the legacy screenshot path. This affects screenshots taken by Lennette only.
+
+The Control+Shift defaults below work while other apps are focused. Carbon hotkeys
+need no Accessibility/Input Monitoring permission; conflicts are logged. Keycodes
+refer to physical ANSI positions. Command-Q opens the quit confirmation; reopening
+from Finder or the Dock restores the overlay. Privacy mode hides Dock/Command-Tab
+and the menu-bar item. Always-on-top uses the native floating window level and both
+windows can appear on full-screen Spaces. Native traffic-light controls are hidden
+on both windows; Lennette keeps its own controls and native dragging/resizing.
+
+Launch on startup registers
+`~/Library/LaunchAgents/com.itssingularity.lennette.plist` for the next login.
+Keep the app at its installed location. Disabling startup removes that registration;
+uninstalling the app keeps settings and keys.
+
+Local verification: `cargo fmt --all -- --check`,
+`cargo clippy --locked --workspace --all-targets -- -D warnings`,
+`cargo test --locked --workspace --all-targets`, and
+`bash scripts/macos-smoke.sh target/debug/lennette`. The native check exercises
+window policy, Spaces, stacking, Dock/menu-bar lifecycle, hotkey registration,
+conflict detection, dispatch/cleanup, and real CoreMedia PCM buffering and errors.
+It requests no recording permissions. Before release, manually test real microphone
+and call audio, permission denial/revocation, Retina/external displays, next-login
+startup, and shortcuts while hidden. Validate each meeting app from a separate
+receiver; full-display invisibility is not guaranteed by these checks.
+Developer ID signing and notarization require the maintainer's credentials.
 
 ### Windows
 
@@ -157,6 +206,17 @@ Install Lennette separately, update your flake lock, rebuild, then **log out and
 | Ctrl+Shift+Space | Hold to dictate with input focused |
 
 While hidden, only **Show / hide** works; active meeting capture continues. Wayland hotkeys need a supported desktop portal or compositor bindings. The Hyprland module configures protected bindings using the physical backslash keycode.
+
+### Shared application identity
+
+Lennette is created by **Singularity Works** · [itssingularity.com](https://itssingularity.com).
+`Cargo.toml` is the source for the version, description, display name, publisher,
+and `com.itssingularity.lennette` application ID. All three desktop platforms use
+the same Cargo package version. Packaging reads `lennette --app-info` from the actual
+binary, including Windows version resources and the Mac bundle. The Rust crate
+and CLI executable remain `lennette`. `cargo xtask bump` updates the manifest and
+lockfile together. Existing data moves to the new platform data location as one
+directory, keeping the encrypted vault and key together; it is never overwritten.
 
 ### Your data
 

@@ -126,12 +126,12 @@ void lenny_macos_hotkeys_free(void *context) {
 
 void *lenny_macos_tray_new(const uint8_t *png, size_t length) {
     if (![NSThread isMainThread]) return NULL;
-    LennyStatusItem *tray = [LennyStatusItem new];
-    tray.pending = [NSMutableArray new];
-    tray.item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
     NSData *data = [NSData dataWithBytes:png length:length];
     NSImage *image = [[NSImage alloc] initWithData:data];
     if (!image) return NULL;
+    LennyStatusItem *tray = [LennyStatusItem new];
+    tray.pending = [NSMutableArray new];
+    tray.item = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
     image.size = NSMakeSize(18, 18);
     image.template = NO;
     image.accessibilityDescription = @"Lennette";

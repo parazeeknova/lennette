@@ -81,8 +81,15 @@ check 'failed upgrade keeps the active launcher' grep -q 'v0.0.0-test' "$test_ho
 check 'failed upgrade keeps the app runnable' check_version
 
 make_release v0.0.1-test
+# Simulate desktop files left by a release using the previous application ID.
+cp "$test_home/.local/share/applications/com.itssingularity.lennette.desktop" "$test_home/.local/share/applications/dev.lennette.overlay.desktop"
+cp "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png" "$test_home/.local/share/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
 rm "$LENNETTE_TEST_LAUNCH_LOG"
 run_launcher update >"$work/update.log"
+check 'update removes the legacy desktop entry' test ! -e "$test_home/.local/share/applications/dev.lennette.overlay.desktop"
+check 'update removes the legacy desktop icon' test ! -e "$test_home/.local/share/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
+check 'update keeps the current desktop entry' test -f "$test_home/.local/share/applications/com.itssingularity.lennette.desktop"
+check 'update keeps the current desktop icon' test -f "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
 check 'lenny update selects the latest release' grep -q 'v0.0.1-test' "$test_home/.local/bin/lenny"
 check 'updates do not launch unexpectedly' test ! -e "$LENNETTE_TEST_LAUNCH_LOG"
 check 'old releases remain available until uninstall' test -d "$test_home/.local/share/lennette/versions/v0.0.0-test"
@@ -98,7 +105,11 @@ if install_here --version '../../escape' >"$work/tag.log" 2>&1; then echo 'FAIL:
 
 mkdir -p "$test_home/.config/lennette"
 printf 'keep me' >"$test_home/.config/lennette/settings"
+cp "$test_home/.local/share/applications/com.itssingularity.lennette.desktop" "$test_home/.local/share/applications/dev.lennette.overlay.desktop"
+cp "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png" "$test_home/.local/share/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
 run_launcher uninstall
+check 'uninstall removes the legacy desktop entry' test ! -e "$test_home/.local/share/applications/dev.lennette.overlay.desktop"
+check 'uninstall removes the legacy desktop icon' test ! -e "$test_home/.local/share/icons/hicolor/512x512/apps/dev.lennette.overlay.png"
 check 'uninstall removes lenny' test ! -e "$test_home/.local/bin/lenny"
 check 'uninstall removes its compatibility alias' test ! -L "$test_home/.local/bin/lennette"
 check 'uninstall removes all release payloads' test ! -e "$test_home/.local/share/lennette/versions"

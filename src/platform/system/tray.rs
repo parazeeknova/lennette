@@ -133,7 +133,7 @@ mod ksni_tray {
 
     impl ksni::Tray for Item {
         fn id(&self) -> String {
-            "com.itssingularity.lennette".into()
+            crate::identity::APP_ID.into()
         }
 
         fn title(&self) -> String {
@@ -155,7 +155,7 @@ mod ksni_tray {
 
         fn icon_name(&self) -> String {
             // A themed name gives the panel a fallback if pixmaps are ignored.
-            crate::identity::NAME.into()
+            crate::identity::APP_ID.into()
         }
 
         fn status(&self) -> ksni::Status {

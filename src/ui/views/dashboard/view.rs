@@ -418,8 +418,11 @@ impl DashboardView {
             } else if matches!(check, settings_pages::CaptureCheck::SystemAudio) {
                 crate::audio::system_audio::SystemAudio::start((!output.is_empty()).then_some(output.as_str())).map(|mut capture| {
                     std::thread::sleep(std::time::Duration::from_secs(1));
-                    let samples = capture.take(32_000); let name = capture.source().to_owned(); let running = capture.is_running(); capture.stop();
-                    if !running { format!("System audio stopped unexpectedly: {name}.") } else if samples.is_empty() { format!("{name} opened. Play meeting audio and test again to confirm samples arrive.") } else { format!("System audio access works: {name}. Test audio was discarded.") }
+                    let samples = capture.take(32_000); let name = capture.source().to_owned(); let running = capture.is_running(); let failure = capture.failure(); capture.stop();
+                    if !running { match failure {
+                        Some(error) => format!("System audio stopped unexpectedly: {name}. {error}"),
+                        None => format!("System audio stopped unexpectedly: {name}."),
+                    } } else if samples.is_empty() { format!("{name} opened. Play meeting audio and test again to confirm samples arrive.") } else { format!("System audio access works: {name}. Test audio was discarded.") }
                 }).map_err(|e| format!("System audio access failed: {e}. Check your selected output and audio server."))
             } else {
                 crate::audio::Microphone::start((!device.is_empty()).then_some(device.as_str())).map(|mic| {
@@ -1908,7 +1911,7 @@ impl DashboardView {
                     .whitespace_normal()
                     .text_color(theme.muted_foreground)
                     .child(
-                        "Built for Windows and Linux with Rust and GPUI. Your provider keys are stored in the \
+                        "Built for Windows, Linux and macOS with Rust and GPUI. Your provider keys are stored in the \
                          encrypted local vault. Selected context is sent to your configured AI \
                          provider when you ask a question.",
                     ),

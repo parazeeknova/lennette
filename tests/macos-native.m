@@ -109,6 +109,7 @@ int main(void) {
         assert(keys);
         assert(lenny_macos_hotkey_add(keys, kVK_F19, controlKey | optionKey | shiftKey, 0) == noErr);
         lenny_macos_hotkeys_free(keys);
+        assert(lenny_macos_tray_new(NULL, 0) == NULL);
         NSData *icon = [NSData dataWithContentsOfFile:@"src/assets/lennette_app_icon.png"];
         assert(icon.length);
         void *tray = lenny_macos_tray_new(icon.bytes, icon.length);

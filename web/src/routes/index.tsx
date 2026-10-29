@@ -269,15 +269,15 @@ const Privacy = () => {
       alt: "A meeting guest list with no lennette bot in it",
     },
     {
-      title: "Invisible to screen share",
-      body: "It never shows up in shared screens, recordings, or external meeting tools.",
+      title: "Screen-share privacy depends on your setup",
+      body: "Windows protection works on capture paths that honor display affinity; Linux needs our patched Hyprland setup. macOS full-display sharing may show Lennette even in Privacy mode. Share a specific application window and verify the receiver's view.",
       src: "https://swr2.itssingularity.com/lennette/notvisible_lennette.png",
       alt: "A shared screen with lennette absent from the recording",
     },
   ];
   return (
     <section id="privacy" className="relative px-6 py-28 sm:px-10">
-      <SectionHeading title="Present for you. Absent for everyone else." />
+      <SectionHeading title="Stay in control of what you share." />
       <div className="mx-auto mt-16 grid max-w-5xl gap-6 md:grid-cols-2">
         {items.map((it) => (
           <article key={it.title} className="glass flex flex-col p-3 sm:p-4">

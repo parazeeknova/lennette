@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn desktop_entry_matches_the_app_id() {
-        assert!(DESKTOP_FILE.contains("Name=lennette"));
+        assert!(DESKTOP_FILE.contains(&format!("Name={}", crate::identity::NAME)));
         assert!(DESKTOP_FILE.contains("Type=Application"));
         assert_eq!(APP_ID, crate::identity::APP_ID);
     }

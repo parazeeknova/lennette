@@ -104,6 +104,9 @@ The shell supplies native libraries; installation preserves their Nix runtime pa
 macOS 13+ on Apple Silicon and Intel is supported. Download the matching app DMG or ZIP
 from [Releases](https://github.com/parazeeknova/lennette/releases), open it, and
 drag `Lennette.app` to Applications. Builds are ad-hoc signed, not notarized.
+If macOS blocks the first launch, first verify that the download came from the
+trusted [Releases page](https://github.com/parazeeknova/lennette/releases). Then
+open System Settings → Privacy & Security → **Open Anyway** to allow Lennette to open.
 Allow Microphone and Screen & System Audio Recording in System Settings.
 
 From source, install Apple's Command Line Tools and Rust, then run

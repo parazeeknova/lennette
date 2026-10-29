@@ -46,6 +46,30 @@ export const NativeSetup = () => {
 
   return (
     <div className="mt-6 flex flex-col gap-3">
+      <h2 className="font-display text-2xl text-ink">
+        {platform === "macos"
+          ? "Install Lennette on macOS"
+          : "Linux and Windows: set up once. Then just lenny."}
+      </h2>
+      {platform === "macos" ? (
+        <p className="max-w-2xl leading-relaxed text-ink-soft">
+          Download the DMG for Apple Silicon or Intel, open it, and drag
+          Lennette.app to Applications. Launch the installed app from Finder.
+        </p>
+      ) : (
+        <p className="max-w-2xl leading-relaxed text-ink-soft">
+          Linux and Windows setup downloads the release, checks it against the
+          published{" "}
+          <code className="rounded bg-white/45 px-1.5 py-0.5 text-ink">
+            SHA256SUMS
+          </code>{" "}
+          manifest and puts{" "}
+          <code className="rounded bg-white/45 px-1.5 py-0.5 text-ink">
+            lenny
+          </code>{" "}
+          on your PATH. No Node.js, clone, toolchain, or admin rights required.
+        </p>
+      )}
       <fieldset className="glass relative flex w-fit gap-1 glass-pill p-1">
         <legend className="sr-only">Setup platform</legend>
         {(["linux", "windows", "macos"] as const).map((os) => {
@@ -73,7 +97,6 @@ export const NativeSetup = () => {
       {platform === "macos" ? (
         <div className="flex flex-col gap-3">
           <p className="text-sm leading-relaxed text-ink-soft">
-            Open the DMG for your Mac and drag Lennette.app to Applications.
             Allow microphone and screen recording access when prompted. macOS 13
             or newer is required.
           </p>
@@ -318,21 +341,6 @@ const DownloadsPage = () => (
     </p>
 
     <section className="mt-14">
-      <h2 className="font-display text-2xl text-ink">
-        Set up once. Then just lenny.
-      </h2>
-      <p className="mt-3 max-w-2xl leading-relaxed text-ink-soft">
-        Setup downloads the release for your computer, checks it against the
-        published{" "}
-        <code className="rounded bg-white/45 px-1.5 py-0.5 text-ink">
-          SHA256SUMS
-        </code>{" "}
-        manifest and puts{" "}
-        <code className="rounded bg-white/45 px-1.5 py-0.5 text-ink">
-          lenny
-        </code>{" "}
-        on your PATH. No Node.js, clone, toolchain, or admin rights required.
-      </p>
       <NativeSetup />
     </section>
 

@@ -217,26 +217,26 @@ try {
     # Explicit privacy launch must omit shell-owned icons.
     $env:LENNETTE_PRIVATE_OVERLAY = $null
     $app = Start-Process -FilePath $Binary -ArgumentList '--privacy' -WindowStyle Hidden -RedirectStandardOutput "$diagnostics.out" -RedirectStandardError "$diagnostics.err" -PassThru
-    Wait-For { $script:overlay = [LennetteWindows]::Find($app.Id, 'lennette'); $overlay -ne [IntPtr]::Zero -and [LennetteWindows]::IsWindowVisible($overlay) } 'protected overlay startup'
+    Wait-For { $script:overlay = [LennetteWindows]::Find($app.Id, 'Lennette'); $overlay -ne [IntPtr]::Zero -and [LennetteWindows]::IsWindowVisible($overlay) } 'protected overlay startup'
     Assert-Protection $overlay
     Start-Sleep -Milliseconds 500
     [LennetteWindows]::AssertPillDrag($overlay)
     [LennetteWindows]::AssertMinimumSize($overlay, 680, 420)
-    if ([LennetteWindows]::Find($app.Id, 'lennette tray') -ne [IntPtr]::Zero) { throw 'Privacy launch created an Explorer tray icon' }
+    if ([LennetteWindows]::Find($app.Id, 'Lennette tray') -ne [IntPtr]::Zero) { throw 'Privacy launch created an Explorer tray icon' }
     # Exercise RegisterHotKey, not just the one-shot control flags.
     [LennetteWindows]::ToggleHotkey()
     Wait-For { -not [LennetteWindows]::IsWindowVisible($overlay) } 'hotkey hide'
     Send-Command '--focus-input'
     Send-Command '--toggle-dashboard'
     if ([LennetteWindows]::IsWindowVisible($overlay)) { throw 'Hidden focus shortcut restored the app' }
-    if ([LennetteWindows]::Find($app.Id, 'lennette dashboard') -ne [IntPtr]::Zero) { throw 'Hidden dashboard shortcut ran' }
+    if ([LennetteWindows]::Find($app.Id, 'Lennette Dashboard') -ne [IntPtr]::Zero) { throw 'Hidden dashboard shortcut ran' }
     [LennetteWindows]::ToggleHotkey()
     Wait-For { [LennetteWindows]::IsWindowVisible($overlay) } 'hotkey restore'
     $script:stage = 'hotkey restore'
     Assert-Protection $overlay
     Send-Command '--toggle-dashboard'
     $script:stage = 'dashboard startup'
-    Wait-For { $script:dashboard = [LennetteWindows]::Find($app.Id, 'lennette dashboard'); $dashboard -ne [IntPtr]::Zero -and [LennetteWindows]::IsWindowVisible($dashboard) } 'dashboard after restore'
+    Wait-For { $script:dashboard = [LennetteWindows]::Find($app.Id, 'Lennette Dashboard'); $dashboard -ne [IntPtr]::Zero -and [LennetteWindows]::IsWindowVisible($dashboard) } 'dashboard after restore'
     Assert-Protection $dashboard
     Start-Sleep -Milliseconds 300
     [LennetteWindows]::AssertDashboardDrag($dashboard)
@@ -273,10 +273,10 @@ try {
     }
     Send-Command '--normal'
     $script:stage = 'normal/privacy switching'
-    Wait-For { [LennetteWindows]::Find($app.Id, 'lennette tray') -ne [IntPtr]::Zero } 'normal-mode tray'
+    Wait-For { [LennetteWindows]::Find($app.Id, 'Lennette tray') -ne [IntPtr]::Zero } 'normal-mode tray'
     Wait-For { ([LennetteWindows]::GetWindowLongPtr($overlay, -20).ToInt64() -band 0x80) -eq 0 } 'normal-mode taskbar style'
     Send-Command '--privacy'
-    Wait-For { [LennetteWindows]::Find($app.Id, 'lennette tray') -eq [IntPtr]::Zero } 'privacy-mode tray removal'
+    Wait-For { [LennetteWindows]::Find($app.Id, 'Lennette tray') -eq [IntPtr]::Zero } 'privacy-mode tray removal'
     Wait-For { ([LennetteWindows]::GetWindowLongPtr($overlay, -20).ToInt64() -band 0x80) -ne 0 } 'privacy-mode taskbar style'
     $script:stage = 'switched overlay'
     Assert-Protection $overlay

@@ -34,6 +34,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=..\..\src\assets\lennette.ico
 UninstallDisplayIcon={app}\lennette.ico
+UninstallDisplayName={#AppName}
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes

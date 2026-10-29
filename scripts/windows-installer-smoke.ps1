@@ -27,7 +27,9 @@ try {
     Invoke-Checked $Installer ($arguments + "/LOG=`"$sandbox\install.log`"")
     $installed = Join-Path $installDir 'lennette.exe'
     $entry = Get-ItemProperty -LiteralPath $registration
-    if ($entry.DisplayName -ne $appInfo.name -or $entry.DisplayVersion -ne $appInfo.version -or $entry.Publisher -ne $appInfo.publisher) { throw 'Installed app identity differs from the binary' }
+    if ($entry.DisplayName -ne $appInfo.name -or $entry.DisplayVersion -ne $appInfo.version -or $entry.Publisher -ne $appInfo.publisher) {
+        throw "Installed app identity differs from the binary: name='$($entry.DisplayName)' (expected '$($appInfo.name)'), version='$($entry.DisplayVersion)' (expected '$($appInfo.version)'), publisher='$($entry.Publisher)' (expected '$($appInfo.publisher)')"
+    }
     if ((Get-FileHash -LiteralPath $installed).Hash -ne (Get-FileHash -LiteralPath $Binary).Hash) { throw 'Installed binary differs from the packaged binary' }
     Invoke-Checked $installed @('--version')
     if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Start menu shortcut was not installed' }

@@ -385,7 +385,7 @@ impl Harness {
     fn app_window(&self, pid: u32) -> Result<Value> {
         self.clients()?
             .into_iter()
-            .find(|v| v["pid"] == pid && v["title"] == "lennette")
+            .find(|v| v["pid"] == pid && v["title"] == "Lennette")
             .context("Missing app window")
     }
     fn spawn(&mut self, executable: &Path, args: &[&str], name: &str) -> Result<usize> {

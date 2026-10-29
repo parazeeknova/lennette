@@ -68,11 +68,11 @@ in
       name = "Lennette (private overlay)";
       comment = "An ambient real-time meeting and discussion copilot";
       exec = command;
-      icon = "dev.lennette.overlay";
+      icon = "com.itssingularity.lennette";
       terminal = false;
       categories = [ "Utility" ];
     };
-    xdg.dataFile."icons/hicolor/512x512/apps/dev.lennette.overlay.png".source =
+    xdg.dataFile."icons/hicolor/512x512/apps/com.itssingularity.lennette.png".source =
       ./assets/lennette_app_icon.png;
   };
 }

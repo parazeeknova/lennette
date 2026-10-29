@@ -1,2 +1,7 @@
 [alias]
 xtask = "run --locked --quiet --package lennette-tools --"
+
+# ScreenCaptureKit system audio requires Ventura or newer. Cargo forwards this
+# to Apple's compiler/linker for both the binary and native dependencies.
+[env]
+MACOSX_DEPLOYMENT_TARGET = { value = "13.0", force = false }

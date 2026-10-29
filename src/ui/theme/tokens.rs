@@ -327,7 +327,11 @@ impl Surfaces {
 
 /// Stable code metrics and programming ligatures in fenced and inline code.
 pub fn code_font_family() -> gpui::SharedString {
-    "FiraCode Nerd Font".into()
+    if cfg!(target_os = "macos") {
+        "Menlo".into()
+    } else {
+        "FiraCode Nerd Font".into()
+    }
 }
 
 /// Bundled proportional UI face, consistent even when the desktop uses a code font.

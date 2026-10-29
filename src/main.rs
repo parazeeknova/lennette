@@ -13,6 +13,17 @@ fn main() {
             );
         }
     }
+    #[cfg(windows)]
+    {
+        let app_id: Vec<u16> = lennette::identity::APP_ID
+            .encode_utf16()
+            .chain([0])
+            .collect();
+        // SAFETY: the terminated identifier lives through the call, before any UI.
+        unsafe {
+            windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
+        }
+    }
     // Shortcut flags run one-shot and exit; anything else launches the app.
     if let Some(output) = cli::handle_args() {
         if !output.is_empty() {

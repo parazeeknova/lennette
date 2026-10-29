@@ -164,7 +164,19 @@ pub fn set_always_on_top(window: &Window, above: bool) -> Applied {
             Applied::Failed
         }
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    {
+        let Some(view) = macos_view(window) else {
+            return Applied::Unsupported;
+        };
+        // SAFETY: the GPUI window owns this live NSView; called on the UI thread.
+        if unsafe { crate::platform::macos::lenny_macos_set_above(view, above) } {
+            Applied::Yes
+        } else {
+            Applied::Failed
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = (window, above);
         Applied::Unsupported
@@ -175,6 +187,14 @@ pub fn set_always_on_top(window: &Window, above: bool) -> Applied {
 fn win32_window(window: &Window) -> Option<windows_sys::Win32::Foundation::HWND> {
     match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as _),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_view(window: &Window) -> Option<*mut std::ffi::c_void> {
+    match HasWindowHandle::window_handle(window).ok()?.as_raw() {
+        RawWindowHandle::AppKit(handle) => Some(handle.ns_view.as_ptr()),
         _ => None,
     }
 }
@@ -206,7 +226,19 @@ pub fn protect_from_capture(window: &Window) -> Result<(), String> {
         }
         set_icon_hidden(window, crate::cli::private_overlay_enabled());
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let view = macos_view(window).ok_or("no macOS window handle")?;
+        // SAFETY: the borrowed NSView belongs to this GPUI window on the UI thread.
+        if !unsafe { crate::platform::macos::lenny_macos_prepare_window(view) } {
+            return Err("Could not configure the macOS window".into());
+        }
+        set_icon_hidden(window, crate::cli::private_overlay_enabled());
+        tracing::warn!(
+            "macOS capture protection is best effort; full-display sharing may include Lennette. Use window sharing and verify the receiver's view."
+        );
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     let _ = window;
     Ok(())
 }
@@ -294,7 +326,17 @@ pub fn set_icon_hidden(window: &Window, hidden: bool) -> Applied {
             Applied::Failed
         }
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window;
+        // SAFETY: activation policy is an application-level AppKit operation on the UI thread.
+        if unsafe { crate::platform::macos::lenny_macos_set_icon_hidden(hidden) } {
+            Applied::Yes
+        } else {
+            Applied::Failed
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = (window, hidden);
         Applied::Unsupported
@@ -451,6 +493,9 @@ pub fn resize(window: &mut Window, width: f32, height: f32) -> Applied {
 
 /// Whether global shortcuts can be registered on this session.
 pub fn global_shortcuts_supported() -> (bool, &'static str) {
+    if cfg!(target_os = "macos") {
+        return crate::platform::shortcuts::support();
+    }
     if cfg!(windows) {
         return (true, "Global shortcuts use Windows hotkeys.");
     }

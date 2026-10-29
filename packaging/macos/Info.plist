@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>Lennette</string>
+    <key>CFBundleDisplayName</key><string>Lennette</string>
+    <key>CFBundleIdentifier</key><string>com.itssingularity.lennette</string>
+    <key>CFBundleExecutable</key><string>lennette</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>Lennette</string>
+    <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+    <key>CFBundleVersion</key><string>@VERSION@</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Lennette uses your microphone for meeting transcription and hold-to-dictate.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Lennette captures system audio to transcribe the other participants in your meeting.</string>
+    <key>NSScreenCaptureUsageDescription</key><string>Lennette captures screen context when you request a screenshot and uses ScreenCaptureKit for meeting audio.</string>
+</dict></plist>

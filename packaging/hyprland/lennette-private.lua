@@ -3,7 +3,7 @@
 -- reject this rule: a normal float/pin rule does not provide capture exclusion.
 hl.window_rule({
 	name = "lennette-private-overlay",
-	match = { class = [[^(dev\.lennette\.overlay|lennette)$]] },
+	match = { class = [[^(com\.itssingularity\.lennette|dev\.lennette\.overlay|lennette)$]] },
 	float = true,
 	pin = true,
 	border_size = 0,
@@ -14,13 +14,13 @@ hl.window_rule({
 })
 hl.window_rule({
 	name = "lennette-overlay-size",
-	match = { class = [[^dev\.lennette\.overlay$]], title = "^lennette$" },
+	match = { class = [[^com\.itssingularity\.lennette$]], title = "^Lennette$" },
 	size = { 720, 620 },
 	center = true,
 })
 hl.window_rule({
 	name = "lennette-dashboard-size",
-	match = { class = [[^dev\.lennette\.overlay$]], title = "^lennette dashboard$" },
+	match = { class = [[^com\.itssingularity\.lennette$]], title = "^Lennette Dashboard$" },
 	size = { 1100, 760 },
 	center = true,
 })

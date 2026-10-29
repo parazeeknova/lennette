@@ -5,7 +5,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $Installer = (Resolve-Path -LiteralPath $Installer).Path
 $Binary = (Resolve-Path -LiteralPath $Binary).Path
-$registration = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{72AF4F45-C286-4FB8-BB11-AD2C8C83985C}_is1'
+$appInfo = (& $Binary --app-info | ConvertFrom-Json)
+if ($LASTEXITCODE -ne 0) { throw 'Could not read application metadata' }
+$versionInfo = (Get-Item -LiteralPath $Binary).VersionInfo
+if ($versionInfo.ProductVersion -ne $appInfo.version -or $versionInfo.ProductName -ne $appInfo.name -or $versionInfo.CompanyName -ne $appInfo.publisher -or $versionInfo.FileDescription -ne $appInfo.description) { throw 'Windows version resources do not match shared app metadata' }
+$registration = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\com.itssingularity.lennette_is1'
 if (Test-Path -LiteralPath $registration) { throw 'Refusing to replace an existing Lennette setup installation. Run this check in a clean Windows account.' }
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('lennette-setup-test-' + [guid]::NewGuid().ToString('N'))
 $installDir = Join-Path $sandbox 'Installed App'
@@ -22,6 +26,8 @@ try {
     $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$installDir`"", "/GROUP=`"$group`"", '/TASKS=')
     Invoke-Checked $Installer ($arguments + "/LOG=`"$sandbox\install.log`"")
     $installed = Join-Path $installDir 'lennette.exe'
+    $entry = Get-ItemProperty -LiteralPath $registration
+    if ($entry.DisplayName -ne $appInfo.name -or $entry.DisplayVersion -ne $appInfo.version -or $entry.Publisher -ne $appInfo.publisher) { throw 'Installed app identity differs from the binary' }
     if ((Get-FileHash -LiteralPath $installed).Hash -ne (Get-FileHash -LiteralPath $Binary).Hash) { throw 'Installed binary differs from the packaged binary' }
     Invoke-Checked $installed @('--version')
     if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Start menu shortcut was not installed' }

@@ -386,7 +386,7 @@ pub fn app_settings(
 
     let startup = section(
         theme,
-        "Launch and Windows",
+        "Launch and windows",
         "How lennette behaves when it is not in focus.",
     )
     .child(row(
@@ -682,6 +682,15 @@ pub fn audio_settings(
     #[cfg(target_os = "linux")]
     {
         access = access.child(help_text(theme, "Linux: allow access to the audio server. System audio requires pactl and parec with PulseAudio or PipeWire-Pulse. Wayland screen capture may request permission through your desktop portal; Hyprland uses grim."));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        access = access.child(help_text(theme, "macOS: allow Microphone and Screen & System Audio Recording in System Settings → Privacy & Security. Restart listening after changing permissions. System audio records the system mix; the output-device selector does not filter it. Hotkeys need no Accessibility or Input Monitoring permission."))
+            .child(row(theme, "macOS recording permissions", "Manage permission to capture screen context and system audio", action("macos-recording-privacy", theme, "Open settings", cx,
+                |_view: &mut crate::ui::dashboard::view::DashboardView, cx, _| {
+                    cx.open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+                })))
+            .child(help_text(theme, "Screen sharing: macOS may include Lennette in a full-display recording. Privacy mode hides app icons; it cannot guarantee capture exclusion. Share a specific window and verify the receiver's view."));
     }
     if let Some(status) = &state.capture_status {
         access = access.child(help_text(theme, status));

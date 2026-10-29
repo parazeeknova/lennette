@@ -244,21 +244,10 @@ impl PortalShortcuts {
 }
 
 /// The application id used for portal calls.
-const APP_ID: &str = "dev.lennette.overlay";
+const APP_ID: &str = crate::identity::APP_ID;
 
 /// The desktop entry the portal needs to resolve the app id.
-const DESKTOP_FILE: &str = r#"[Desktop Entry]
-Type=Application
-Name=lennette
-GenericName=Ambient Real-Time Meeting Copilot
-Comment=An ambient real-time meeting and discussion copilot
-Exec=lennette
-Icon=dev.lennette.overlay
-Terminal=false
-Categories=Utility;AudioVideo;Audio;Office;
-Keywords=ai;meeting;transcription;copilot;speech;audio;notes;live;intelligence;
-StartupWMClass=dev.lennette.overlay
-"#;
+const DESKTOP_FILE: &str = include_str!("../../../packaging/com.itssingularity.lennette.desktop");
 
 /// Install the desktop entry into the user's applications directory.
 ///
@@ -389,9 +378,9 @@ mod tests {
 
     #[test]
     fn desktop_entry_matches_the_app_id() {
-        assert!(DESKTOP_FILE.contains("Name=lennette"));
+        assert!(DESKTOP_FILE.contains(&format!("Name={}", crate::identity::NAME)));
         assert!(DESKTOP_FILE.contains("Type=Application"));
-        assert!(APP_ID.starts_with("dev.lennette"));
+        assert_eq!(APP_ID, crate::identity::APP_ID);
     }
 
     #[test]

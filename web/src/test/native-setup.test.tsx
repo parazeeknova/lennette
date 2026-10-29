@@ -21,7 +21,33 @@ describe("Native setup platform selection", () => {
       "true"
     );
     expect(screen.getByText(`One-time setup · ${shell}`)).toBeInTheDocument();
-    expect(screen.getByText("lenny", { selector: "code" })).toBeInTheDocument();
+    expect(
+      screen.getByText("lenny", { selector: "pre code" })
+    ).toBeInTheDocument();
+  });
+
+  it("shows Mac installation copy without promising shell setup or automatic verification", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Linux x86_64");
+    render(<NativeSetup />);
+    fireEvent.click(screen.getByRole("button", { name: "macOS" }));
+    expect(
+      screen.getByRole("heading", { name: "Install Lennette on macOS" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Apple Silicon DMG" })
+    ).toHaveAttribute("href", expect.stringContaining("macos-aarch64.dmg"));
+    expect(screen.getByRole("link", { name: "Intel DMG" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("macos-x86_64.dmg")
+    );
+    expect(screen.queryByText("SHA256SUMS")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("lenny", { selector: "code" })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/on your PATH/u)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Windows" }));
+    expect(screen.getByText("SHA256SUMS")).toBeInTheDocument();
+    expect(screen.getByText(/on your PATH/u)).toBeInTheDocument();
   });
 
   it("lets the user override detection and copies the command for that choice", async () => {

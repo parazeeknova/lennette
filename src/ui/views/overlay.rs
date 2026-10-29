@@ -2075,7 +2075,7 @@ impl Overlay {
         tray.set_tooltip(if self.is_listening() {
             "lennette · listening"
         } else {
-            "lennette"
+            crate::identity::NAME
         });
         let actions = tray.poll();
         for action in actions {
@@ -2096,8 +2096,7 @@ impl Overlay {
                     self.handle_shortcut(crate::features::shortcuts::Action::PrivacyMode, cx);
                 }
                 TrayAction::Quit => {
-                    self.show_window(cx);
-                    self.show_dialog(session_menu::Dialog::Quit);
+                    self.request_quit(cx);
                 }
             }
         }
@@ -2166,7 +2165,13 @@ impl Overlay {
         }
     }
 
-    fn show_window(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn request_quit(&mut self, cx: &mut Context<Self>) {
+        self.show_window(cx);
+        self.show_dialog(session_menu::Dialog::Quit);
+        cx.notify();
+    }
+
+    pub(crate) fn show_window(&mut self, cx: &mut Context<Self>) {
         #[cfg(windows)]
         if !self.set_native_visibility(true, cx) {
             return;

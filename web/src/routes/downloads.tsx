@@ -174,11 +174,16 @@ const cards: Card[] = [
     name: "Windows",
     requirement: "x86_64",
     status: "Windows 10 or newer",
-    body: "One file, no installer. Just download and run it. It hides itself from screen shares automatically, so there is nothing extra to set up.",
+    body: "Choose the installer for Start menu shortcuts and an uninstaller, or the portable app to download and run without installing. Both hide Lennette from screen shares automatically.",
     releases: [
       {
+        asset: "lennette-windows-x86_64-setup.exe",
+        label: "Download installer .exe",
+        note: "Setup wizard with shortcuts and uninstaller",
+      },
+      {
         asset: "lennette-windows-x86_64.exe",
-        label: "Download .exe",
+        label: "Download portable .exe",
         note: "Portable, no install",
       },
     ],
@@ -247,7 +252,8 @@ const DownloadsPage = () => (
       {cards.map((card) => (
         <article
           key={card.name}
-          className="glass flex flex-col rounded-3xl p-6"
+          id={card.platform}
+          className="glass flex scroll-mt-28 flex-col rounded-3xl p-6"
         >
           <div className="relative z-10 flex flex-1 flex-col">
             <div className="flex items-start justify-between gap-3">

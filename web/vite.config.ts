@@ -8,7 +8,7 @@ import { defineConfig } from "vite";
 
 const src = path.join(import.meta.dirname, "src");
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   // Bind all interfaces so the site is reachable from other devices on the
   // network (phone, another machine over Tailscale).
   server: { host: true, port: 8080 },
@@ -60,8 +60,13 @@ export default defineConfig({
       },
     }),
     viteReact(),
-    // Target Cloudflare Workers for deploy; `node-server` locally so `vite
-    // preview` still works without wrangler.
-    nitro({ preset: process.env["NITRO_PRESET"] ?? "cloudflare-module" }),
+    // Use Node for local dev/preview: the Miniflare runner fails to resolve
+    // Nitro's generated worker imports on Windows. Builds target Cloudflare.
+    // NITRO_PRESET can still opt into a specific runtime explicitly.
+    nitro({
+      preset:
+        process.env["NITRO_PRESET"] ??
+        (command === "serve" ? "node-server" : "cloudflare-module"),
+    }),
   ],
-});
+}));

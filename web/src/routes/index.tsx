@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AudioLines,
   Component,
@@ -54,6 +54,25 @@ const Hero = () => (
         next.
       </p>
       <PlatformDownload />
+      <nav
+        aria-label="Downloads by platform"
+        className="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-on-sky text-sky-shadow"
+      >
+        {[
+          { platform: "windows", label: "Windows · Installer or portable" },
+          { platform: "macos", label: "macOS · Apple Silicon or Intel" },
+          { platform: "linux", label: "Linux" },
+        ].map(({ platform, label }) => (
+          <Link
+            key={platform}
+            to="/downloads"
+            hash={platform}
+            className="rounded-sm underline decoration-current/40 underline-offset-4 transition-colors hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-4"
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
 
       <div className="glass mt-14 w-full max-w-5xl p-2.5 sm:p-3">
         <img

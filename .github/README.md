@@ -2,7 +2,6 @@
 
 <p align="center">An ambient real-time meeting and discussion copilot.<br />Live transcripts, useful context, and answers when you need them. Built with Rust + GPUI.</p>
 
-
 ### What it does
 
 - **Listen to both sides.** Microphone and system-audio transcription with separate speaker context.
@@ -57,17 +56,11 @@ For setup without opening the app, use `bash -s -- --no-launch` on Linux or
 `& ([scriptblock]::Create((irm https://lennette.itssingularity.com/install.ps1))) -NoLaunch`
 on Windows.
 
-The two native setup scripts live directly in `web/public/install` and
-`web/public/install.ps1`, served as `/install` and `/install.ps1`. There are no
+The two native setup scripts live directly in `apps/web/public/install` and
+`apps/web/public/install.ps1`, served as `/install` and `/install.ps1`. There are no
 root copies or generated copies. Bash and PowerShell need different setup
 syntax; after setup, users only need `lenny`. Windows exposes one `lenny.cmd`
 command, avoiding a conflicting `lenny.ps1` that execution policy could block.
-
-Linux needs the release build's glibc version and your distribution's desktop,
-Vulkan, and audio libraries; these are not bundled in the archive. Setup reports
-loader errors, and `lenny doctor` checks missing libraries and a desktop session.
-On NixOS, use the Nix installation below to supply the interpreter and runtime
-libraries. macOS app DMGs and ZIPs are available for Apple Silicon and Intel; see the macOS section below. Linux and Windows ARM builds are not available.
 
 Prefer a plain download? Grab a build from [Releases](https://github.com/parazeeknova/lennette/releases). SHA-256 checksums are included.
 
@@ -117,37 +110,6 @@ text backend and launches with blank text. `tests/macos_text.rs` guards this.
 The branded app includes a multi-resolution Finder/Dock icon. Its bundle identity
 is `com.itssingularity.lennette`. The release also includes a branded drag-to-Applications
 DMG; the ZIP is available as an alternative.
-
-System audio uses ScreenCaptureKit (no virtual driver) and captures the system mix,
-excluding Lennette's own output. The selected output device does not filter that mix.
-After changing recording permissions, stop/restart listening and relaunch if macOS asks.
-Screenshots use ScreenCaptureKit with explicit self-exclusion on macOS 14+; Ventura
-retains the legacy screenshot path. This affects screenshots taken by Lennette only.
-
-The Control+Shift defaults below work while other apps are focused. Carbon hotkeys
-need no Accessibility/Input Monitoring permission; conflicts are logged. Keycodes
-refer to physical ANSI positions. Command-Q opens the quit confirmation; reopening
-from Finder or the Dock restores the overlay. Privacy mode hides Dock/Command-Tab
-and the menu-bar item. Always-on-top uses the native floating window level and both
-windows can appear on full-screen Spaces. Native traffic-light controls are hidden
-on both windows; Lennette keeps its own controls and native dragging/resizing.
-
-Launch on startup registers
-`~/Library/LaunchAgents/com.itssingularity.lennette.plist` for the next login.
-Keep the app at its installed location. Disabling startup removes that registration;
-uninstalling the app keeps settings and keys.
-
-Local verification: `cargo fmt --all -- --check`,
-`cargo clippy --locked --workspace --all-targets -- -D warnings`,
-`cargo test --locked --workspace --all-targets`, and
-`bash scripts/macos-smoke.sh target/debug/lennette`. The native check exercises
-window policy, Spaces, stacking, Dock/menu-bar lifecycle, hotkey registration,
-conflict detection, dispatch/cleanup, and real CoreMedia PCM buffering and errors.
-It requests no recording permissions. Before release, manually test real microphone
-and call audio, permission denial/revocation, Retina/external displays, next-login
-startup, and shortcuts while hidden. Validate each meeting app from a separate
-receiver; full-display invisibility is not guaranteed by these checks.
-Developer ID signing and notarization require the maintainer's credentials.
 
 ### Windows
 
@@ -213,7 +175,7 @@ While hidden, only **Show / hide** works; active meeting capture continues. Wayl
 ### Shared application identity
 
 Lennette is created by **Singularity Works** · [itssingularity.com](https://itssingularity.com).
-`Cargo.toml` is the source for the version, description, display name, publisher,
+`apps/desktop/Cargo.toml` is the source for the version, description, display name, publisher,
 and `com.itssingularity.lennette` application ID. All three desktop platforms use
 the same Cargo package version. Packaging reads `lennette --app-info` from the actual
 binary, including Windows version resources and the Mac bundle. The Rust crate

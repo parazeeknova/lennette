@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 staging="$(mktemp -d "${TMPDIR:-/tmp}/lennette-native.XXXXXX")"
 trap 'rm -rf "$staging"' EXIT
 xcrun clang -fobjc-arc -fblocks -mmacosx-version-min=13.0 -Wall -Wextra -Werror \
-    tests/macos-native.m -o "$staging/native-smoke" \
+    apps/desktop/tests/macos-native.m -o "$staging/native-smoke" \
     -framework AppKit -framework Carbon -framework ScreenCaptureKit \
     -framework CoreMedia -framework CoreAudio -framework CoreGraphics
 "$staging/native-smoke"

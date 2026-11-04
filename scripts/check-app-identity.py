@@ -41,7 +41,7 @@ def main():
     assert entry["Icon"] == entry["StartupWMClass"] == expected["identifier"]
     assert entry["X-Lennette-Publisher"] == expected["publisher"]
     assert entry["X-Lennette-Website"] == expected["website"]
-    pwa = json.loads((ROOT / "web/public/site.webmanifest").read_text())
+    pwa = json.loads((ROOT / "apps/web/public/site.webmanifest").read_text())
     assert pwa["name"] == expected["name"]
     assert pwa["description"] == expected["description"]
     keys = {
@@ -64,7 +64,7 @@ def main():
         icon = args.bundle / "Contents/Resources" / (plist["CFBundleIconFile"] + ".icns")
         assert icon.read_bytes()[:4] == b"icns", "Missing or invalid branded app icon"
         assert (args.bundle / "Contents/Resources/lennette_app_icon.png").read_bytes() == (
-            ROOT / "src/assets/lennette_app_icon.png").read_bytes(), "Bundle artwork differs from source"
+            ROOT / "apps/desktop/src/assets/lennette_app_icon.png").read_bytes(), "Bundle artwork differs from source"
     print(f"Application identity verified: {expected['name']} {expected['version']} · {expected['identifier']} · {expected['publisher']}")
 
 

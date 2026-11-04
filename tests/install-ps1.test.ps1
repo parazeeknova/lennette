@@ -2,7 +2,7 @@
 # PowerShell on Linux can also exercise the setup/manager using a shell fixture.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$installer = Join-Path $root 'web/public/install.ps1'
+$installer = Join-Path $root 'apps/web/public/install.ps1'
 $nativeWindows = $env:OS -eq 'Windows_NT'
 $shell = (Get-Process -Id $PID).Path
 $work = Join-Path ([IO.Path]::GetTempPath()) ('lennette-test-' + [guid]::NewGuid().ToString('N'))

@@ -1,0 +1,11 @@
+[package]
+name = "lennette-protocol"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+uuid = { workspace = true, features = ["v4", "v5", "serde"] }
+validator = { version = "0.21", features = ["derive"] }

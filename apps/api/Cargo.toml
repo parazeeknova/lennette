@@ -1,0 +1,54 @@
+[package]
+name = "lennette-server"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[dependencies]
+rustls.workspace = true
+lennette-protocol = { path = "../../crates/protocol" }
+lennette-attachments = { path = "../../crates/attachments" }
+anyhow.workspace = true
+thiserror.workspace = true
+axum = { version = "0.8.9", features = ["ws", "macros", "multipart"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tower = { version = "0.5", features = ["util", "limit"] }
+tower-http = { version = "0.7", features = ["cors", "trace", "request-id", "sensitive-headers", "limit"] }
+sea-orm = { version = "2.0.4", default-features = false, features = ["macros", "sqlx-postgres", "runtime-tokio-rustls", "with-uuid", "with-json", "with-chrono"] }
+sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres"] }
+fred = { version = "10.1", features = ["i-scripts", "i-keys", "i-pubsub"] }
+reqwest = { workspace = true, default-features = false, features = [ "json", "stream", "form"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+validator = { version = "0.21", features = ["derive"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.34"
+opentelemetry-appender-tracing = "0.33"
+opentelemetry = "0.33"
+opentelemetry_sdk = "0.33"
+opentelemetry-http = "0.33"
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "http-proto", "reqwest-blocking-client"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand.workspace = true
+sha2.workspace = true
+hmac = "0.13"
+base64.workspace = true
+subtle = "2.6"
+url = "2.5"
+futures-util = "0.3"
+async-stream = "0.3"
+bytes = "1"
+hound = "3.5"
+object_store = { version = "0.14.2", default-features = false, features = ["aws-base", "reqwest", "ring"] }
+secrecy = { version = "0.10", features = ["serde"] }
+
+[dev-dependencies]
+lennette-sync-client = { path = "../../crates/sync-client" }
+http-body-util = "0.1"
+tempfile = "3"

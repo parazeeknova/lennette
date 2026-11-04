@@ -101,7 +101,7 @@ struct Config {
 impl Config {
     fn from_env(root: &Path) -> Result<Self> {
         let manifest: toml_edit::DocumentMut =
-            fs::read_to_string(root.join("Cargo.toml"))?.parse()?;
+            fs::read_to_string(crate::bump::app_manifest(root))?.parse()?;
         Ok(Self {
             repo: std::env::var("GITHUB_REPOSITORY")?,
             sha: std::env::var("GITHUB_SHA")?,

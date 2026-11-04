@@ -21,12 +21,12 @@ chmod +x "$app/Contents/MacOS/lennette"
 cp packaging/macos/Info.plist "$app/Contents/Info.plist"
 python3 scripts/check-app-identity.py "$binary" --write-macos-plist "$app/Contents/Info.plist"
 for size in 16 32 128 256 512; do
-    sips -z "$size" "$size" src/assets/lennette_app_icon.png --out "$staging/Lennette.iconset/icon_${size}x${size}.png" >/dev/null
+    sips -z "$size" "$size" apps/desktop/src/assets/lennette_app_icon.png --out "$staging/Lennette.iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
-    sips -z "$double" "$double" src/assets/lennette_app_icon.png --out "$staging/Lennette.iconset/icon_${size}x${size}@2x.png" >/dev/null
+    sips -z "$double" "$double" apps/desktop/src/assets/lennette_app_icon.png --out "$staging/Lennette.iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
 iconutil -c icns "$staging/Lennette.iconset" -o "$app/Contents/Resources/Lennette.icns"
-cp src/assets/lennette_app_icon.png "$app/Contents/Resources/"
+cp apps/desktop/src/assets/lennette_app_icon.png "$app/Contents/Resources/"
 cp LICENSE "$app/Contents/Resources/"
 cp .github/README.md "$app/Contents/Resources/README.md"
 plutil -lint "$app/Contents/Info.plist"

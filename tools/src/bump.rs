@@ -4,6 +4,15 @@ use regex::Regex;
 use std::{fs, path::Path, process::Command};
 use toml_edit::{DocumentMut, value};
 
+pub(crate) fn app_manifest(root: &Path) -> std::path::PathBuf {
+    let path = root.join("apps/desktop/Cargo.toml");
+    if path.exists() {
+        path
+    } else {
+        root.join("Cargo.toml")
+    }
+}
+
 fn next_version(version: &str, mode: &str, message: &str) -> Result<String> {
     let numbers: Vec<u64> = version
         .split('-')
@@ -45,7 +54,7 @@ fn next_version(version: &str, mode: &str, message: &str) -> Result<String> {
 }
 
 fn update(root: &Path, mode: &str, message: &str) -> Result<(String, String)> {
-    let manifest_path = root.join("Cargo.toml");
+    let manifest_path = app_manifest(root);
     let lock_path = root.join("Cargo.lock");
     let manifest_text = fs::read_to_string(&manifest_path)?;
     let lock_text = fs::read_to_string(&lock_path)?;
@@ -94,7 +103,10 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
         .current_dir(root)
-        .args(["add", "--", "Cargo.toml", "Cargo.lock"])
+        .arg("add")
+        .arg("--")
+        .arg(app_manifest(root))
+        .arg("Cargo.lock")
         .status()?;
     ensure!(
         status.success(),

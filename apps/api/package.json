@@ -1,0 +1,13 @@
+{
+  "name": "@lennette/api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development bun --no-env-file ../../scripts/dev-env.mjs api cargo run -p lennette-server",
+    "build": "cargo build -p lennette-server --release",
+    "typecheck": "cargo check -p lennette-server --all-targets",
+    "lint": "cargo clippy -p lennette-server --all-targets -- -D warnings",
+    "test": "cargo test -p lennette-server",
+    "migrate": "cross-env NODE_ENV=development bun --no-env-file ../../scripts/dev-env.mjs api cargo run --locked -p lennette-server -- migrate"
+  }
+}

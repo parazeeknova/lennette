@@ -1,0 +1,12 @@
+{
+  "name": "@lennette/desktop",
+  "version": "0.18.26",
+  "private": true,
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development bun --no-env-file ../../scripts/dev-env.mjs desktop cargo run -p lennette",
+    "build": "cargo build -p lennette --release",
+    "typecheck": "cargo check -p lennette --all-targets",
+    "lint": "cargo clippy -p lennette --all-targets -- -D warnings",
+    "test": "cargo test -p lennette --lib"
+  }
+}

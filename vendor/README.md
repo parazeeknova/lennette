@@ -1,7 +1,17 @@
 # Vendored patches
 
-Minimal, documented patches for transitive dependencies that fail to build with
-current toolchains. Each one is scoped to a single targeted fix.
+Only dependencies requiring local compatibility fixes belong here. Keep their
+source, licenses, and test fixtures; omit registry cache markers and duplicate
+unpatched manifests. Remove each patch when its upstream fix is adopted.
+
+## `redis-protocol` 6.0.0
+
+Fred 10.1 depends on this crate, which pins `cookie-factory` to `=0.3.2`.
+The desktop's PipeWire dependency requires `^0.3.3`, preventing workspace
+resolution. The only source change is allowing the compatible 0.3.3 patch
+release in Cargo.toml. The crate also allows the new lifetime-syntax warning
+emitted by the current compiler for its older public type aliases. Keep this
+patch until upstream relaxes the pin.
 
 ## `xattr` 0.2.3
 

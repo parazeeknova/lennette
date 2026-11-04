@@ -24,12 +24,9 @@ const GithubMark = ({ className = "" }: { className?: string }) => (
 );
 
 const navLinks = [
-  { label: "How it works", to: "/", hash: "how" },
-  { label: "Features", to: "/", hash: "features" },
   { label: "Tutorial", to: "/tutorial" },
   { label: "Downloads", to: "/downloads" },
   { label: "Pricing", to: "/pricing" },
-  { label: "Account", to: "/account" },
 ] as const;
 
 export const SiteNav = () => {
@@ -87,7 +84,6 @@ export const SiteNav = () => {
             <Link
               key={link.label}
               to={link.to}
-              {...("hash" in link ? { hash: link.hash } : {})}
               className="transition-colors hover:text-ink"
             >
               {link.label}
@@ -123,7 +119,6 @@ export const SiteNav = () => {
                   <Link
                     key={link.label}
                     to={link.to}
-                    {...("hash" in link ? { hash: link.hash } : {})}
                     onClick={() => setOpen(false)}
                     className="relative z-10 flex min-h-12 items-center rounded-2xl px-4 text-base font-medium text-ink transition-colors hover:bg-white/65 focus-visible:bg-white/65 focus-visible:outline-2 focus-visible:outline-sky-deep"
                   >
@@ -134,7 +129,7 @@ export const SiteNav = () => {
             ) : null}
           </div>
           <Link
-            to="/downloads"
+            to="/account"
             className="glass btn-liquid hidden h-12 glass-pill px-5 text-sm sm:inline-flex"
           >
             <span>Get lennette</span>

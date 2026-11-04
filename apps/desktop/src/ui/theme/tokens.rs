@@ -69,6 +69,29 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn promotion(self) -> Self {
+        let white = gpui::rgb(0xffffff);
+        Self {
+            background: gpui::rgb(0x3979be),
+            foreground: white,
+            muted_foreground: white,
+            primary: white,
+            frame_border: Self::with_alpha(
+                white,
+                if self.frame_border.a > 0.0 { 0.85 } else { 0.0 },
+            ),
+            frame_outer_border: Self::with_alpha(
+                white,
+                if self.frame_outer_border.a > 0.0 {
+                    0.35
+                } else {
+                    0.0
+                },
+            ),
+            ..self
+        }
+    }
+
     pub fn from_settings(settings: &crate::core::settings::Settings) -> Self {
         let mut theme = Self::from_choice(settings.theme);
         if !settings.show_borders {

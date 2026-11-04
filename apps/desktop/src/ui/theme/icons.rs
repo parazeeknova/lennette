@@ -65,6 +65,34 @@ pub fn brand_logo() -> ImageSource {
     }
 }
 
+/// Decode the native app icon once; a string image source is treated as a
+/// filesystem path by GPUI rather than an embedded asset.
+pub fn app_icon() -> ImageSource {
+    static ICON: std::sync::LazyLock<std::sync::Arc<RenderImage>> =
+        std::sync::LazyLock::new(|| {
+            let mut rgba =
+                image::load_from_memory(include_bytes!("../../assets/lennette_app_icon.png"))
+                    .expect("bundled app icon")
+                    .into_rgba8();
+            for pixel in rgba.as_chunks_mut::<4>().0 {
+                pixel.swap(0, 2);
+            }
+            std::sync::Arc::new(RenderImage::new([image::Frame::new(rgba)]))
+        });
+    ImageSource::Render(ICON.clone())
+}
+
+pub fn login_icon(theme: &Theme, provider: &str, size: f32) -> impl IntoElement {
+    gpui::svg()
+        .path(if provider == "github" {
+            "model-icons/github.svg"
+        } else {
+            "model-icons/google.svg"
+        })
+        .size(px(size))
+        .text_color(theme.foreground)
+}
+
 /// Bundled monochrome families and common model-name aliases.
 type ModelAsset = (&'static [&'static str], &'static str, &'static [u8]);
 const MODEL_FAMILIES: &[ModelAsset] = &[
@@ -248,6 +276,12 @@ pub fn model_icon(theme: &Theme, provider: &str, model: &str, size: f32) -> gpui
 
 /// Single source for the embedded SVG assets used by every native window.
 pub fn model_asset(path: &str) -> Option<&'static [u8]> {
+    if path == "model-icons/google.svg" {
+        return Some(include_bytes!("../../assets/model-icons/google.svg"));
+    }
+    if path == "model-icons/github.svg" {
+        return Some(include_bytes!("../../assets/model-icons/github.svg"));
+    }
     if path == "model-icons/LICENSE" {
         return Some(include_bytes!("../../assets/model-icons/LICENSE"));
     }

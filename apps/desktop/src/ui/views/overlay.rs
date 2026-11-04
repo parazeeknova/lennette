@@ -4408,57 +4408,65 @@ impl Overlay {
         if self.has_provider_access() {
             return None;
         }
-        let theme = self.theme;
+        let material = self.theme.promotion();
         Some(
-            div()
-                .px(px(12.0))
-                .pb(px(8.0))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(8.0))
-                        .px(px(12.0))
-                        .py(px(7.0))
-                        .rounded(px(radius::MD))
-                        .bg(crate::ui::widgets::blur::tint(self.theme,crate::ui::widgets::blur::Surface::Input))
-                        .border_1()
-                        .border_color(self.surfaces().border())
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(icons::icon_colored(theme.warning, Icon::KeyRound, 13.0))
-                                .child(
-                                    div()
-                                        .text_size(scaled(11.5))
-                                        .text_color(theme.foreground)
-                                        .child("Connect Deepgram for speech and Gemini or Merge Gateway for answers in Settings."),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(4.0))
-                                .px(px(8.0))
-                                .py(px(3.0))
-                                .rounded_full()
-                                .bg(self.surfaces().muted())
-                                .hover(|style| style.bg(self.surfaces().accent()))
-                                .text_size(scaled(10.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.foreground)
-                                .cursor_pointer()
-                                .id("configure-keys-banner")
-                                .child("Configure")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.open_dashboard_at(cx, crate::features::dashboard::nav::Route::DevSpace);
-                                })),
-                        ),
-                ),
+            div().px(px(12.0)).pb(px(8.0)).child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .rounded(px(radius::MD))
+                    .bg(material.background)
+                    .text_color(material.foreground)
+                    .child(crate::ui::widgets::material::dual_edge(
+                        material,
+                        radius::MD,
+                    ))
+                    .child(icons::icon_colored(
+                        material.foreground,
+                        Icon::Sparkles,
+                        14.0,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .whitespace_nowrap()
+                            .text_size(scaled(11.0))
+                            .child("Connect Lennette or bring your own keys to get started."),
+                    )
+                    .child(
+                        div()
+                            .id("connect-lennette-banner")
+                            .cursor_pointer()
+                            .text_size(scaled(10.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Connect Lennette")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_dashboard_at(
+                                    cx,
+                                    crate::features::dashboard::nav::Route::Settings,
+                                )
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("configure-keys-banner")
+                            .cursor_pointer()
+                            .text_size(scaled(10.5))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Use my keys")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.open_dashboard_at(
+                                    cx,
+                                    crate::features::dashboard::nav::Route::DevSpace,
+                                )
+                            })),
+                    ),
+            ),
         )
     }
 

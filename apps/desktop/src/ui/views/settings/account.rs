@@ -133,8 +133,8 @@ pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui:
                 .child(feature(theme,Icon::FolderOpen,"History & attachments")))
             .child(div().border_t_1().border_color(theme.border).pt(px(16.0)).child(row(theme,"Bring your history along","Optional: import existing conversations, transcripts, prompts, and profiles on first connection.",switch("account-import",theme,view.account_import(),cx,|view:&mut View,cx,_|{view.toggle_account_import();cx.notify();}))))
             .child(div().flex().flex_wrap().gap(px(8.0))
-                .child(action("account-google",theme,if view.account_busy(){"Connecting…"}else{"Continue with Google"},cx,|view:&mut View,cx,_|view.start_account_login("google",cx)))
-                .child(action("account-github",theme,"Continue with GitHub",cx,|view:&mut View,cx,_|view.start_account_login("github",cx)))
+                .child(login_button("account-google", "google", theme, view.account_busy(), cx))
+                .child(login_button("account-github", "github", theme, view.account_busy(), cx))
                 .child(action("account-plans",theme,"View plans",cx,|_:&mut View,cx,_|open_website(cx,"pricing"))))
             .child(help_text(theme,"Sign in securely in your browser. Creating an account is free; managed AI requires a paid plan. Provider keys and device settings stay local."));
     }
@@ -209,4 +209,49 @@ pub(super) fn open_website(cx: &mut Context<View>, path: &str) {
     let website = std::env::var("LENNETTE_WEBSITE_URL")
         .unwrap_or_else(|_| "https://lennette.itssingularity.com".into());
     cx.open_url(&format!("{}/{path}", website.trim_end_matches('/')));
+}
+
+pub(super) fn login_button(
+    id: &'static str,
+    provider: &'static str,
+    theme: &Theme,
+    busy: bool,
+    cx: &mut Context<View>,
+) -> impl IntoElement {
+    let button = Theme {
+        background: theme.foreground,
+        foreground: theme.background,
+        primary: theme.foreground,
+        ..*theme
+    };
+    div()
+        .id(id)
+        .relative()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(7.0))
+        .h(px(28.0))
+        .px(px(10.0))
+        .rounded(px(radius::MD))
+        .bg(theme.foreground)
+        .text_color(theme.background)
+        .text_size(scaled(11.0))
+        .font_weight(FontWeight::MEDIUM)
+        .cursor_pointer()
+        .opacity(if busy { 0.6 } else { 1.0 })
+        .child(icons::login_icon(&button, provider, 14.0))
+        .child(if busy {
+            "Connecting…"
+        } else if provider == "google" {
+            "Continue with Google"
+        } else {
+            "Continue with GitHub"
+        })
+        .child(crate::ui::widgets::material::dual_edge(*theme, radius::MD))
+        .on_click(cx.listener(move |view, _, _, cx| {
+            if !view.account_busy() {
+                view.start_account_login(provider, cx);
+            }
+        }))
 }

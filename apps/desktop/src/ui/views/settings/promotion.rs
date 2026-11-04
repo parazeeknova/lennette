@@ -22,20 +22,13 @@ pub(super) fn banner(view: &View, theme: &Theme, cx: &mut Context<View>) -> impl
     } else {
         (
             "Unlock more with Lennette.",
-            "Managed AI, live sync and cloud storage—ready across your devices.",
+            "Managed AI, live sync and cloud storage, ready across your devices.",
             "Explore plans",
         )
     };
-    let blue = gpui::rgb(0x3979be);
-    let white = gpui::rgb(0xffffff);
-    let material = Theme {
-        background: blue,
-        foreground: white,
-        primary: white,
-        frame_border: Theme::with_alpha(white, theme.frame_border.a.min(0.18)),
-        frame_outer_border: Theme::with_alpha(white, theme.frame_outer_border.a.min(0.06)),
-        ..*theme
-    };
+    let material = theme.promotion();
+    let blue = material.background;
+    let white = material.foreground;
     div()
         .relative()
         .flex_1()
@@ -57,11 +50,7 @@ pub(super) fn banner(view: &View, theme: &Theme, cx: &mut Context<View>) -> impl
                 .flex()
                 .items_start()
                 .gap(px(12.0))
-                .child(
-                    gpui::img("lennette_app_icon.png")
-                        .size(px(40.0))
-                        .flex_shrink_0(),
-                )
+                .child(gpui::img(icons::app_icon()).size(px(40.0)).flex_shrink_0())
                 .child(
                     div()
                         .flex_1()
@@ -83,11 +72,28 @@ pub(super) fn banner(view: &View, theme: &Theme, cx: &mut Context<View>) -> impl
                         ),
                 ),
         )
-        .child(div().flex().items_center().justify_end().child(action(
-            "settings-upgrade-banner",
-            &material,
-            label,
-            cx,
-            |_: &mut View, cx, _| account::open_website(cx, "account"),
-        )))
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_end()
+                .gap(px(8.0))
+                .when(!connected, |row| {
+                    row.child(account::login_button(
+                        "promotion-google",
+                        "google",
+                        &material,
+                        view.account_busy(),
+                        cx,
+                    ))
+                })
+                .child(action(
+                    "settings-upgrade-banner",
+                    &material,
+                    label,
+                    cx,
+                    |_: &mut View, cx, _| account::open_website(cx, "account"),
+                )),
+        )
 }

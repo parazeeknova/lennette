@@ -336,6 +336,7 @@ pub struct Overlay {
     configuration_version: Option<(i64, Option<std::time::SystemTime>, u64)>,
     managed_session: Option<lennette_sync_client::Client>,
     managed_model_labels: std::collections::HashMap<String, String>,
+    locked_models: Vec<crate::managed::catalog::Model>,
     mode: Mode,
     size: OverlaySize,
     conversation: Conversation,
@@ -384,6 +385,7 @@ pub struct Overlay {
     dictation: Option<Dictation>,
     dictation_task: Option<gpui::Task<()>>,
     dictation_busy: bool,
+    dictation_hint_dismissed: bool,
     dictation_status: Option<String>,
     context_menu_open: bool,
     context_sources: Vec<crate::core::context::Attachment>,
@@ -611,6 +613,7 @@ impl Overlay {
             configuration_version: None,
             managed_session: None,
             managed_model_labels: std::collections::HashMap::new(),
+            locked_models: Vec::new(),
             mode: Mode::default(),
             size: OverlaySize::default(),
             conversation: Conversation::new(),
@@ -650,6 +653,7 @@ impl Overlay {
             dictation: None,
             dictation_task: None,
             dictation_busy: false,
+            dictation_hint_dismissed: false,
             dictation_status: None,
             context_menu_open: false,
             context_sources: Vec::new(),
@@ -2333,7 +2337,8 @@ impl Overlay {
             .items_center()
             .gap(px(6.0))
             .h(px(40.0))
-            .px(px(8.0))
+            .pl(px(8.0))
+            .pr(px(5.0))
             .rounded_full()
             .bg(crate::ui::widgets::blur::tint(
                 self.theme,
@@ -2536,7 +2541,7 @@ impl Overlay {
             .justify_center()
             .w(px(38.0))
             .h(px(30.0))
-            .rounded(px(12.0))
+            .rounded_full()
             .bg(if recording {
                 theme.fill(Theme::with_alpha(theme.destructive, 0.12))
             } else {
@@ -2949,6 +2954,7 @@ impl Overlay {
             self.catalog_choices.clear();
             self.catalog_status = None;
             self.managed_model_labels.clear();
+            self.locked_models.clear();
             self.model_provider = None;
             self.model = None;
         }
@@ -3951,22 +3957,34 @@ impl Overlay {
         }
         self.catalog_choices.sort();
         self.catalog_choices.dedup();
-        self.catalog_loading = !configs.is_empty();
+        self.catalog_loading = true;
         self.catalog_status = None;
         let path = self.services.database_path.clone();
+        let preview_cache = self.locked_models.clone();
         self.catalog_task = Some(cx.spawn(async move |this, cx| {
-            let results = futures_util::future::join_all(configs.into_iter().map(|config| {
+            let discovery = futures_util::future::join_all(configs.into_iter().map(|config| {
                 let path = path.clone();
                 async move {
                     let id = config.id.clone();
                     (id, crate::ai::models::discover(path, config, force).await)
                 }
-            }))
-            .await;
+            }));
+            let previews = async {
+                if !force && !preview_cache.is_empty() {
+                    Ok(preview_cache)
+                } else {
+                    crate::managed::catalog::public_models().await
+                }
+            };
+            let (results, previews) = tokio::join!(discovery, previews);
             this.update(cx, |this, cx| {
                 let mut errors = Vec::new();
                 if crate::managed::active().is_some() {
                     return;
+                }
+                match previews {
+                    Ok(models) => this.locked_models = models,
+                    Err(error) => errors.push(error),
                 }
                 for (id, result) in results {
                     match result {
@@ -4001,10 +4019,7 @@ impl Overlay {
             .iter()
             .map(|m| (provider.clone(), m.id.clone()))
             .collect();
-        self.managed_model_labels = models
-            .into_iter()
-            .map(|m| (m.id, format!("{} · {}×", m.name, m.multiplier)))
-            .collect();
+        self.managed_model_labels = models.into_iter().map(|m| (m.id, m.name)).collect();
         self.chat_choices = self.catalog_choices.clone();
         let selected = self
             .model
@@ -4071,6 +4086,7 @@ impl Overlay {
         self.pending_question = None;
         self.pending_created = None;
         self.pending_since = None;
+        self.dictation_hint_dismissed = true;
         self.dictation = Some(Dictation {
             microphone,
             samples: Vec::new(),
@@ -4181,6 +4197,13 @@ impl Overlay {
         }));
     }
 
+    fn show_dictation_hint(&self) -> bool {
+        !self.dictation_hint_dismissed
+            && self.composer.text().is_empty()
+            && self.dictation.is_none()
+            && !self.dictation_busy
+    }
+
     fn dictation_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         text_tool(
             &self.theme,
@@ -4189,11 +4212,21 @@ impl Overlay {
             "Hold to dictate · Ctrl+Shift+Space · release to insert, Esc to cancel",
         )
         .id("push-to-talk")
+        .w_auto()
+        .min_w(px(30.0))
+        .px(px(5.0))
+        .gap(px(4.0))
+        .children(self.show_dictation_hint().then(|| {
+            div()
+                .text_size(scaled(10.0))
+                .text_color(self.theme.muted_foreground)
+                .child("Press & hold")
+        }))
         .bg(if self.dictation.is_some() {
             self.theme
                 .fill(Theme::with_alpha(self.theme.destructive, 0.12))
         } else {
-            self.surfaces().muted()
+            Theme::with_alpha(self.theme.background, 0.0)
         })
         .opacity(if self.dictation_busy { 0.4 } else { 1.0 })
         .on_mouse_down(
@@ -4238,6 +4271,12 @@ impl Overlay {
             .cursor_pointer()
             .text_size(scaled(11.0))
             .text_color(self.theme.foreground)
+            .child(icons::model_icon(
+                &self.theme,
+                self.model_provider.as_deref().unwrap_or_default(),
+                self.model.as_deref().unwrap_or_default(),
+                13.0,
+            ))
             .child(div().max_w(px(150.0)).truncate().child(label))
             .child(icons::icon(&self.theme, Icon::ChevronDown, 10.0))
             .child(menu_probe(self.model_bounds.clone(), cx))
@@ -5036,18 +5075,13 @@ fn text_tool(
         .items_center()
         .justify_center()
         .size(px(30.0))
-        .rounded(px(radius::MD))
-        .border_1()
-        .border_color(theme.control_border(false))
-        .when(theme.is_glass(), |style| style.bg(surfaces.muted()))
+        .rounded_full()
         .hover(|style| {
-            style
-                .bg(if theme.is_glass() {
-                    surfaces.accent()
-                } else {
-                    surfaces.muted()
-                })
-                .border_color(theme.control_border(true))
+            style.bg(if theme.is_glass() {
+                surfaces.accent()
+            } else {
+                surfaces.muted()
+            })
         })
         .cursor_pointer()
         .id(gpui::ElementId::Name(tooltip.into()))
@@ -6923,6 +6957,22 @@ mod tests {
     }
 
     #[test]
+    fn mic_hint_collapses_for_typing_and_stays_dismissed_after_dictation() {
+        let (path, mut overlay) = fixture();
+        assert!(overlay.show_dictation_hint());
+        overlay.composer.set_text("A question");
+        assert!(!overlay.show_dictation_hint());
+        overlay.composer.clear();
+        assert!(overlay.show_dictation_hint());
+        overlay.dictation_busy = true;
+        assert!(!overlay.show_dictation_hint());
+        overlay.dictation_busy = false;
+        overlay.dictation_hint_dismissed = true;
+        assert!(!overlay.show_dictation_hint());
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
     fn managed_picker_loads_without_keys_preserves_open_menu_and_local_provider_settings() {
         let (path, mut overlay) = fixture();
         let db = crate::db::Database::open(path.join("managed-picker.db")).unwrap();
@@ -6955,7 +7005,7 @@ mod tests {
             overlay.model_provider.as_deref(),
             Some(crate::managed::catalog::PROVIDER)
         );
-        assert_eq!(overlay.managed_model_labels["balanced"], "Balanced · 2×");
+        assert_eq!(overlay.managed_model_labels["balanced"], "Balanced");
         overlay.select_model("balanced");
         overlay.apply_managed_models(models());
         assert_eq!(overlay.model.as_deref(), Some("balanced"));

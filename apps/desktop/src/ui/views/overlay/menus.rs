@@ -84,11 +84,14 @@ impl Overlay {
                     .get(model)
                     .cloned()
                     .unwrap_or_else(|| {
-                        format!(
-                            "{} · {}",
-                            self.provider_names.get(provider).unwrap_or(provider),
-                            model
-                        )
+                        self.locked_models
+                            .iter()
+                            .find(|m| {
+                                m.id == *model
+                                    || m.id.rsplit('/').next() == model.rsplit('/').next()
+                            })
+                            .map(|m| m.name.clone())
+                            .unwrap_or_else(|| model.clone())
                     });
                 let searchable = format!("{label} {provider} {model}").to_lowercase();
                 if !query
@@ -104,7 +107,24 @@ impl Overlay {
                 let model = model.clone();
                 rows = rows.child(
                     self.menu_row(("provider-choice", index), active)
+                        .child(icons::model_icon(&theme, &provider, &model, 16.0))
                         .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
+                        .child(if provider == crate::managed::catalog::PROVIDER {
+                            lennette_badge(&theme).into_any_element()
+                        } else {
+                            div()
+                                .max_w(px(85.0))
+                                .truncate()
+                                .text_size(scaled(9.0))
+                                .text_color(theme.muted_foreground)
+                                .child(
+                                    self.provider_names
+                                        .get(&provider)
+                                        .unwrap_or(&provider)
+                                        .clone(),
+                                )
+                                .into_any_element()
+                        })
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.model_provider = Some(provider.clone());
                             this.select_model(&model);
@@ -113,7 +133,18 @@ impl Overlay {
                         })),
                 );
             }
-            if count == 0 {
+            let locked: Vec<_> = if crate::managed::active().is_none() {
+                self.locked_models
+                    .iter()
+                    .filter(|model| {
+                        let text = format!("{} {}", model.name, model.id).to_lowercase();
+                        query.split_whitespace().all(|word| text.contains(word))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if count == 0 && locked.is_empty() {
                 rows = rows.child(
                     div()
                         .p(px(10.0))
@@ -128,6 +159,47 @@ impl Overlay {
                         } else {
                             "No matching models."
                         }),
+                );
+            }
+            if !locked.is_empty() {
+                rows = rows.child(
+                    div()
+                        .pt(px(12.0))
+                        .pb(px(5.0))
+                        .px(px(8.0))
+                        .text_size(scaled(10.0))
+                        .text_color(theme.muted_foreground)
+                        .child("Lennette models"),
+                );
+                for (index, model) in locked.into_iter().enumerate() {
+                    let label = format!(
+                        "{}{}",
+                        model.name,
+                        if model.plus_only { " · Plus" } else { "" }
+                    );
+                    rows = rows.child(div().id(("locked-managed-model", index))
+                        .flex().items_center().gap(px(8.0)).px(px(8.0)).py(px(7.0))
+                        .opacity(0.45).text_color(theme.muted_foreground).text_size(scaled(11.0))
+                        .tooltip(move |_, cx| cx.new(|_| super::HoverLabel {
+                            text: "Sign in with an active Lennette subscription to use this model.".into(), theme,
+                        }).into())
+                        .child(icons::model_icon(&theme, crate::managed::catalog::PROVIDER, &model.id, 16.0))
+                        .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
+                        .child(lennette_badge(&theme))
+                        .child(icons::icon(&theme, Icon::LockKeyhole, 12.0)));
+                }
+                rows = rows.child(
+                    self.menu_row("connect-managed-models", false)
+                        .child(icons::icon(&theme, Icon::UserRound, 14.0))
+                        .child("Connect Lennette")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_pill_menus();
+                            this.open_dashboard_at(
+                                cx,
+                                crate::features::dashboard::nav::Route::Settings,
+                            );
+                            cx.notify();
+                        })),
                 );
             }
             if let Some(status) = &self.catalog_status {
@@ -178,7 +250,7 @@ impl Overlay {
                     .snap_to_window_with_margin(px(8.0))
                     .child(
                         div()
-                            .w(px(if self.model_menu_open { 240.0 } else { 190.0 }))
+                            .w(px(if self.model_menu_open { 310.0 } else { 190.0 }))
                             .child(crate::ui::widgets::motion::reveal(
                                 menu,
                                 (
@@ -230,4 +302,26 @@ impl Overlay {
                 cx.notify();
             }))
     }
+}
+
+/// Hosted-provider badge stays recognizable without coloring model logos.
+fn lennette_badge(theme: &Theme) -> gpui::Div {
+    let color = if theme.foreground.r < 0.5 {
+        gpui::rgb(0x3456c5)
+    } else {
+        gpui::rgb(0x9baeff)
+    };
+    div()
+        .flex_shrink_0()
+        .w(px(26.0))
+        .h(px(18.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(3.0))
+        .bg(Theme::with_alpha(color, 0.16))
+        .text_color(color)
+        .text_size(scaled(8.5))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .child("LEN")
 }

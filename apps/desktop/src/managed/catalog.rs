@@ -24,6 +24,39 @@ pub async fn models(client: &Client) -> Result<Vec<Model>, String> {
     )
 }
 
+/// Public previews never attach an account token or a provider API key.
+pub async fn public_models() -> Result<Vec<Model>, String> {
+    public_models_from(&super::api_url()).await
+}
+
+async fn public_models_from(base: &str) -> Result<Vec<Model>, String> {
+    let mut url: reqwest::Url = base.parse().map_err(|_| "Invalid account service URL.")?;
+    if url.scheme() != "https" && !(url.scheme() == "http" && url.host_str() == Some("127.0.0.1")) {
+        return Err("Account service must use HTTPS or loopback.".into());
+    }
+    url.set_path("/v1/catalog");
+    url.set_query(None);
+    url.set_fragment(None);
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response =
+        client.get(url).send().await.map_err(
+            |_| "Hosted model previews are unavailable. Your local providers still work.",
+        )?;
+    let response = lennette_sync_client::checked(response)
+        .await
+        .map_err(|e| e.to_string())?;
+    let catalog = response
+        .json()
+        .await
+        .map_err(|_| "Could not read hosted model previews.")?;
+    eligible_models(catalog, true)
+}
+
 fn eligible_models(catalog: Value, plus: bool) -> Result<Vec<Model>, String> {
     let mut models: Vec<Model> = serde_json::from_value(catalog["models"].clone())
         .map_err(|_| "The account service returned an invalid model catalog.")?;
@@ -38,6 +71,32 @@ fn eligible_models(catalog: Value, plus: bool) -> Result<Vec<Model>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn public_previews_need_no_account_or_provider_keys() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            while !bytes.windows(4).any(|v| v == b"\r\n\r\n") {
+                let mut chunk = [0u8; 4096];
+                let count = socket.read(&mut chunk).await.unwrap();
+                assert!(count > 0);
+                bytes.extend_from_slice(&chunk[..count]);
+            }
+            let request = String::from_utf8(bytes).unwrap().to_lowercase();
+            assert!(request.starts_with("get /v1/catalog "));
+            assert!(!request.contains("authorization:") && !request.contains("cookie:"));
+            let body =
+                r#"{"models":[{"id":"preview","name":"Preview","multiplier":1,"plus_only":true}]}"#;
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+        });
+        assert_eq!(public_models_from(&base).await.unwrap()[0].id, "preview");
+        server.await.unwrap();
+        assert!(public_models_from("http://example.com").await.is_err());
+    }
+
     #[tokio::test]
     async fn loads_catalog_and_tier_through_account_api_without_provider_keys() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

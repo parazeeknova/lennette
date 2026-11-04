@@ -254,23 +254,25 @@ export const PageShell = ({
   /** Heading text. Omit when `titleIcon` already spells the full heading. */
   title?: string;
   titleIcon?: [before: string, after: string];
-  breadcrumb: string;
+  breadcrumb?: string;
 }) => (
   <main className="overflow-x-clip bg-sky-wash">
     <SiteNav />
     <section className="px-6 pt-40 pb-16 sm:px-10">
       <div className="mx-auto max-w-5xl">
-        <nav aria-label="Breadcrumb" className="mb-7 text-sm text-ink-soft">
-          <ol className="flex items-center justify-center gap-2">
-            <li>
-              <Link to="/" className="hover:text-ink">
-                Home
-              </Link>
-            </li>
-            <li aria-hidden="true">/</li>
-            <li aria-current="page">{breadcrumb}</li>
-          </ol>
-        </nav>
+        {breadcrumb && (
+          <nav aria-label="Breadcrumb" className="mb-7 text-sm text-ink-soft">
+            <ol className="flex items-center justify-center gap-2">
+              <li>
+                <Link to="/" className="hover:text-ink">
+                  Home
+                </Link>
+              </li>
+              <li aria-hidden="true">/</li>
+              <li aria-current="page">{breadcrumb}</li>
+            </ol>
+          </nav>
+        )}
         {titleIcon ? (
           <div className="text-center">
             <h1 className="font-display text-[clamp(2.6rem,6vw,4.8rem)] leading-[1.05] tracking-[-0.015em] text-ink">

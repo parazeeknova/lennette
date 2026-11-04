@@ -20,11 +20,7 @@ export const LEGAL_UPDATED = "November 4, 2026";
 export const LEGAL_EMAIL = "harsh@itssingularity.com";
 
 export const LegalPage = ({ document }: { document: LegalDocument }) => (
-  <PageShell
-    breadcrumb={document.title}
-    title={document.title}
-    intro={document.intro}
-  >
+  <PageShell title={document.title} intro={document.intro}>
     <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
       <nav
         aria-label="Legal documents"

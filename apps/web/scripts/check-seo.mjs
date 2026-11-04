@@ -64,7 +64,14 @@ await Promise.all(
       pageUrl(path)
     );
     if (path !== "/") {
-      one('nav[aria-label="Breadcrumb"]');
+      if (path === "/terms" || path === "/privacy") {
+        assert.equal(
+          document.querySelector('nav[aria-label="Breadcrumb"]'),
+          null
+        );
+      } else {
+        one('nav[aria-label="Breadcrumb"]');
+      }
       assert.equal(
         graph
           .find((node) => node["@type"] === "BreadcrumbList")

@@ -102,6 +102,8 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
         .unwrap_or_default()
         .to_string_lossy()
         .to_ascii_lowercase();
+    let content_type =
+        lennette_attachments::validate(&name, None, &bytes).map_err(str::to_owned)?;
     if matches!(extension.as_str(), "png" | "jpg" | "jpeg") {
         use base64::Engine;
         let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
@@ -120,16 +122,7 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
         image
             .write_to(&mut png, image::ImageFormat::Png)
             .map_err(|e| e.to_string())?;
-        let blob_id = crate::managed::cache_attachment(
-            &id,
-            &name,
-            if extension == "png" {
-                "image/png"
-            } else {
-                "image/jpeg"
-            },
-            &bytes,
-        )?;
+        let blob_id = crate::managed::cache_attachment(&id, &name, content_type, &bytes)?;
         return Ok(Attachment {
             id,
             name,
@@ -140,7 +133,32 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
             remote_blob_id: None,
         });
     }
-    let text = if extension == "pdf" {
+    let text = if extension == "docx" {
+        lennette_attachments::docx_text(&bytes).map_err(str::to_owned)?
+    } else if extension == "xlsx" {
+        use calamine::Reader;
+        let mut workbook: calamine::Xlsx<_> =
+            calamine::open_workbook_from_rs(std::io::Cursor::new(&bytes))
+                .map_err(|_| "Could not read spreadsheet.".to_owned())?;
+        let mut text = String::new();
+        'sheets: for name in workbook.sheet_names().to_owned().into_iter().take(32) {
+            text.push_str(&format!("\nSheet: {name}\n"));
+            let sheet = workbook
+                .worksheet_range(&name)
+                .map_err(|_| "Could not read spreadsheet.".to_owned())?;
+            for row in sheet.rows().take(10_000) {
+                for cell in row.iter().take(256) {
+                    text.push_str(&cell.to_string());
+                    text.push('\t');
+                    if text.len() > 256_000 {
+                        break 'sheets;
+                    }
+                }
+                text.push('\n');
+            }
+        }
+        text
+    } else if extension == "pdf" {
         pdf_extract::extract_text_from_mem(&bytes)
             .map_err(|error| format!("Could not read PDF: {error}"))?
     } else {
@@ -153,16 +171,7 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
     if text.trim().is_empty() {
         return Err("No readable text found. Scanned PDFs need OCR first.".into());
     }
-    let blob_id = crate::managed::cache_attachment(
-        &id,
-        &name,
-        if extension == "pdf" {
-            "application/pdf"
-        } else {
-            "text/plain"
-        },
-        &bytes,
-    )?;
+    let blob_id = crate::managed::cache_attachment(&id, &name, content_type, &bytes)?;
     let mut attachment = Attachment::text(id, name, text);
     attachment.blob_id = blob_id;
     Ok(attachment)

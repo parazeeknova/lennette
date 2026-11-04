@@ -58,17 +58,29 @@ pub fn init(path: Option<&Path>) {
                     .enable_all()
                     .build()
                     .expect("sync runtime");
+                let mut failures = 0u32;
                 loop {
                     if let (Some(client), Some(path)) = (active(), DATABASE.get()) {
                         let _lock = SYNC_LOCK.lock().unwrap();
                         let result = Database::open(path)
                             .map_err(|e| e.to_string())
                             .and_then(|db| runtime.block_on(sync_and_save(&client, &db)));
-                        if let Err(error) = result {
-                            message(error)
+                        match result {
+                            Ok(()) => failures = 0,
+                            Err(error) => {
+                                failures = failures.saturating_add(1);
+                                message(error);
+                            }
                         }
+                    } else {
+                        failures = 0;
                     }
-                    std::thread::sleep(Duration::from_millis(500));
+                    let delay = if failures == 0 {
+                        500
+                    } else {
+                        (1_000u64 << failures.min(5)).min(30_000)
+                    };
+                    std::thread::sleep(Duration::from_millis(delay));
                 }
             })
             .expect("start sync worker");

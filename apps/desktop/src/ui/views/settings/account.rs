@@ -26,7 +26,7 @@ pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui:
             .child(row(
                 theme,
                 "Managed · $17.10/month",
-                "300 meeting minutes, model-weighted AI credits and 1 GB storage",
+                "300 meeting minutes, model-weighted AI credits and 10 GB storage",
                 action(
                     "account-standard",
                     theme,
@@ -38,7 +38,7 @@ pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui:
             .child(row(
                 theme,
                 "Managed Plus · $40/month",
-                "1,200 meeting minutes, more AI credits, premium models and 5 GB storage",
+                "1,200 meeting minutes, more AI credits, premium models and 50 GB storage",
                 action(
                     "account-plus",
                     theme,

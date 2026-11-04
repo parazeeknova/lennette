@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 rustls.workspace = true
 lennette-protocol = { path = "../../crates/protocol" }
+lennette-attachments = { path = "../../crates/attachments" }
 anyhow.workspace = true
 thiserror.workspace = true
 axum = { version = "0.8.9", features = ["ws", "macros", "multipart"] }
@@ -43,6 +44,7 @@ futures-util = "0.3"
 async-stream = "0.3"
 bytes = "1"
 hound = "3.5"
+object_store = { version = "0.14.2", default-features = false, features = ["aws-base", "reqwest", "ring"] }
 secrecy = { version = "0.10", features = ["serde"] }
 
 [dev-dependencies]

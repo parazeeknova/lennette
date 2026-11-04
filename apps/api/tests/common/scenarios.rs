@@ -20,22 +20,25 @@ use std::{
 };
 use tokio::sync::RwLock;
 
-fn configured(state: &AppState, config: Config) -> AppState {
+pub(super) fn configured(state: &AppState, config: Config) -> AppState {
     AppState(Arc::new(lennette_server::state::Inner {
         config,
         db: state.db.clone(),
         redis: state.redis.clone(),
         http: state.http.clone(),
         shutdown: state.shutdown.clone(),
+        attachments: state.attachments.clone(),
+        upload_permits: state.upload_permits.clone(),
+        events: state.events.clone(),
     }))
 }
-async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
+pub(super) async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, task)
 }
-async fn body_request(
+pub(super) async fn body_request(
     app: &Router,
     path: &str,
     token: &str,
@@ -618,12 +621,13 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
     desktop.close(None).await.ok();
     mobile.close(None).await.ok();
     assert!(
-        tokio::fs::read_dir(&state.config.attachment_dir)
-            .await
+        state
+            .attachments
+            .as_ref()
             .unwrap()
-            .next_entry()
+            .list(None)
+            .next()
             .await
-            .unwrap()
             .is_none()
     );
     api_task.abort();

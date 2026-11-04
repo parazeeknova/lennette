@@ -1,6 +1,6 @@
 use anyhow::Context;
 use secrecy::{ExposeSecret, SecretString};
-use std::{env, net::SocketAddr, path::PathBuf};
+use std::{env, net::SocketAddr};
 use url::Url;
 
 #[derive(Clone)]
@@ -11,6 +11,14 @@ pub struct OAuthConfig {
     pub token_url: String,
     pub userinfo_url: String,
     pub emails_url: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct R2Config {
+    pub endpoint: Url,
+    pub bucket: String,
+    pub access_key_id: SecretString,
+    pub secret_access_key: SecretString,
 }
 
 #[derive(Clone)]
@@ -31,7 +39,9 @@ pub struct Config {
     pub dodo_url: Url,
     pub dodo_standard_product: String,
     pub dodo_plus_product: String,
-    pub attachment_dir: PathBuf,
+    pub r2: Option<R2Config>,
+    pub clamd_address: Option<String>,
+    pub trusted_proxy_ips: Vec<std::net::IpAddr>,
     pub mobile_redirects: Vec<String>,
 }
 impl Config {
@@ -84,7 +94,60 @@ impl Config {
             dodo_url: get("DODO_API_URL", "https://test.dodopayments.com/").parse()?,
             dodo_standard_product: get("DODO_STANDARD_PRODUCT_ID", ""),
             dodo_plus_product: get("DODO_PLUS_PRODUCT_ID", ""),
-            attachment_dir: get("ATTACHMENT_DIR", "./data/attachments").into(),
+            r2: {
+                let endpoint = get("R2_ENDPOINT", "");
+                let bucket = get("R2_BUCKET", "");
+                let access_key_id = secret("R2_ACCESS_KEY_ID");
+                let secret_access_key = secret("R2_SECRET_ACCESS_KEY");
+                if endpoint.is_empty()
+                    && bucket.is_empty()
+                    && access_key_id.expose_secret().is_empty()
+                    && secret_access_key.expose_secret().is_empty()
+                {
+                    None
+                } else {
+                    anyhow::ensure!(
+                        !endpoint.is_empty()
+                            && !bucket.is_empty()
+                            && !access_key_id.expose_secret().is_empty()
+                            && !secret_access_key.expose_secret().is_empty(),
+                        "R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY must all be set"
+                    );
+                    Some(R2Config {
+                        endpoint: endpoint.parse().context("invalid R2_ENDPOINT")?,
+                        bucket,
+                        access_key_id,
+                        secret_access_key,
+                    })
+                }
+            },
+            clamd_address: {
+                let address = get("CLAMD_ADDRESS", "");
+                if address.is_empty() {
+                    None
+                } else {
+                    anyhow::ensure!(
+                        address.len() <= 255
+                            && address
+                                .rsplit_once(':')
+                                .is_some_and(|(host, port)| !host.is_empty()
+                                    && port.parse::<u16>().is_ok_and(|p| p != 0))
+                            && address.chars().all(|c| c.is_ascii_alphanumeric()
+                                || matches!(c, '.' | '-' | ':' | '[' | ']')),
+                        "CLAMD_ADDRESS must be a private host:port"
+                    );
+                    Some(address)
+                }
+            },
+            trusted_proxy_ips: get("TRUSTED_PROXY_IPS", "")
+                .split(',')
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| {
+                    v.trim()
+                        .parse()
+                        .context("TRUSTED_PROXY_IPS must contain comma-separated IP addresses")
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?,
             mobile_redirects: get("MOBILE_REDIRECT_URIS", "")
                 .split(',')
                 .filter(|s| !s.is_empty())

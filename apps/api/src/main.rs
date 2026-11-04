@@ -13,21 +13,27 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(state.config.bind).await?;
     tracing::info!(address = %listener.local_addr()?, "API listening");
     let shutdown = state.shutdown.clone();
-    axum::serve(listener, lennette_server::routes::router(state))
-        .with_graceful_shutdown(async move {
-            #[cfg(unix)]
-            let terminate = async {
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("SIGTERM handler")
-                    .recv()
-                    .await;
-            };
-            #[cfg(not(unix))]
-            let terminate = std::future::pending::<()>();
-            tokio::select! {_=tokio::signal::ctrl_c()=>{},_=terminate=>{}}
-            shutdown.cancel();
-        })
-        .await?;
+    lennette_server::storage::cleanup::start(state.clone());
+    lennette_server::http::events::start(state.clone());
+    axum::serve(
+        listener,
+        lennette_server::routes::router(state)
+            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        #[cfg(unix)]
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler")
+                .recv()
+                .await;
+        };
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+        tokio::select! {_=tokio::signal::ctrl_c()=>{},_=terminate=>{}}
+        shutdown.cancel();
+    })
+    .await?;
     if let Some(provider) = telemetry {
         provider.shutdown()?;
     }

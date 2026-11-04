@@ -15,7 +15,7 @@ pub const STANDARD: Plan = Plan {
     monthly_cents: 1710,
     ai_microdollars: 2_000_000,
     transcription_seconds: 300 * 60,
-    storage_bytes: 1_073_741_824,
+    storage_bytes: 10_000_000_000,
     max_devices: 3,
 };
 pub const PLUS: Plan = Plan {
@@ -23,7 +23,7 @@ pub const PLUS: Plan = Plan {
     monthly_cents: 4000,
     ai_microdollars: 6_000_000,
     transcription_seconds: 1200 * 60,
-    storage_bytes: 5 * 1_073_741_824,
+    storage_bytes: 50_000_000_000,
     max_devices: 6,
 };
 pub fn plan(id: &str) -> Option<Plan> {
@@ -134,5 +134,11 @@ mod tests {
             assert!(names.insert(m.id));
             assert!(m.multiplier > 0);
         }
+    }
+
+    #[test]
+    fn storage_quotas_use_the_advertised_decimal_gigabytes() {
+        assert_eq!(STANDARD.storage_bytes, 10_000_000_000);
+        assert_eq!(PLUS.storage_bytes, 50_000_000_000);
     }
 }

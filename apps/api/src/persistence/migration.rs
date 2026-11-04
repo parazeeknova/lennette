@@ -3,7 +3,74 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(Initial), Box::new(BillingHolds)]
+        vec![
+            Box::new(Initial),
+            Box::new(BillingHolds),
+            Box::new(ObjectUploads),
+            Box::new(AccountEvents),
+            Box::new(AttachmentRefs),
+        ]
+    }
+}
+struct AttachmentRefs;
+impl MigrationName for AttachmentRefs {
+    fn name(&self) -> &str {
+        "m20261104_005_attachment_refs"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AttachmentRefs {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(include_str!("../../migrations/005_attachment_refs.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "attachment reference rollback disabled".into(),
+        ))
+    }
+}
+struct AccountEvents;
+impl MigrationName for AccountEvents {
+    fn name(&self) -> &str {
+        "m20261104_004_account_events"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AccountEvents {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(include_str!("../../migrations/004_account_events.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("event rollback disabled".into()))
+    }
+}
+struct ObjectUploads;
+impl MigrationName for ObjectUploads {
+    fn name(&self) -> &str {
+        "m20261104_003_object_uploads"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ObjectUploads {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(include_str!("../../migrations/003_object_uploads.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "pending object cleanup must not be discarded".into(),
+        ))
     }
 }
 struct BillingHolds;

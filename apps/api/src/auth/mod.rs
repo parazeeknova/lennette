@@ -3,6 +3,7 @@ use crate::{
     error::{ApiError, Result},
     state::AppState,
 };
+pub mod browser;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -92,7 +93,7 @@ pub async fn start(
     {
         return Err(ApiError::BadRequest("PKCE must use S256".into()));
     }
-    validate_redirect(&request.redirect_uri, &state.config.mobile_redirects)?;
+    browser::redirect(&state, &request.redirect_uri)?;
     state.limit("oauth-start".into(), 200, 60).await?;
     state
         .limit(format!("oauth:{}", request.device_id), 10, 60)
@@ -161,7 +162,8 @@ pub async fn callback(
     State(state): State<AppState>,
     Path(provider): Path<String>,
     Query(query): Query<Callback>,
-) -> Result<Redirect> {
+    headers: axum::http::HeaderMap,
+) -> Result<Response> {
     let raw: Option<String> = state
         .redis
         .getdel(format!("oauth:{}", digest(&query.state)))
@@ -262,6 +264,11 @@ pub async fn callback(
         )
     };
     let account_id = find_or_create(&state, &provider, &subject, &email, &display_name).await?;
+    if let Some(response) =
+        browser::complete(&state, &headers, account_id, &pending.request).await?
+    {
+        return Ok(response);
+    }
     let ticket = random_token();
     let value = serde_json::to_string(&Ticket {
         account_id,
@@ -278,15 +285,14 @@ pub async fn callback(
             false,
         )
         .await?;
-    let mut redirect = validate_redirect(
-        &pending.request.redirect_uri,
-        &state.config.mobile_redirects,
-    )?;
+    let mut redirect = browser::redirect(&state, &pending.request.redirect_uri)?;
     redirect
         .query_pairs_mut()
         .append_pair("ticket", &ticket)
         .append_pair("state", &pending.request.code_challenge);
-    Ok(Redirect::to(redirect.as_str()))
+    Ok(axum::response::IntoResponse::into_response(Redirect::to(
+        redirect.as_str(),
+    )))
 }
 
 async fn find_or_create(
@@ -507,9 +513,50 @@ pub async fn guard(
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .ok_or(ApiError::Unauthorized)?;
-    let principal = authenticate(&state, token).await?;
+        .and_then(|s| s.strip_prefix("Bearer "));
+    let principal = if let Some(token) = token {
+        authenticate(&state, token).await?
+    } else {
+        if !matches!(
+            *request.method(),
+            axum::http::Method::GET | axum::http::Method::HEAD
+        ) {
+            browser::origin(&state, request.headers())?;
+        }
+        browser::authenticate_cookie(
+            &state,
+            request.headers(),
+            !matches!(
+                *request.method(),
+                axum::http::Method::GET | axum::http::Method::HEAD
+            ),
+        )
+        .await?
+    };
+    if token.is_none()
+        && request.method() == axum::http::Method::DELETE
+        && request.uri().path() == "/me"
+    {
+        if request
+            .headers()
+            .get("x-delete-confirmation")
+            .and_then(|v| v.to_str().ok())
+            != Some("DELETE")
+        {
+            return Err(ApiError::BadRequest(
+                "explicit account deletion confirmation is required".into(),
+            ));
+        }
+        let session = sessions::Entity::find_by_id(principal.session_id)
+            .one(&state.db)
+            .await?
+            .ok_or(ApiError::Unauthorized)?;
+        if session.created_at < Utc::now() - Duration::minutes(10) {
+            return Err(ApiError::BadRequest(
+                "sign out and sign in again before deleting your account".into(),
+            ));
+        }
+    }
     state
         .limit(format!("api:{}", principal.account_id), 300, 60)
         .await?;
@@ -540,7 +587,7 @@ pub async fn devices(
         .filter(sessions::Column::RefreshExpiresAt.gt(Utc::now()))
         .all(&state.db)
         .await?;
-    Ok(Json(json!(devices.into_iter().map(|s|json!({"session_id":s.id,"device_id":s.device_id,"name":s.device_name,"created_at":s.created_at,"current":s.id==p.session_id})).collect::<Vec<_>>())))
+    Ok(Json(json!(devices.into_iter().map(|s|json!({"session_id":s.id,"device_id":s.device_id,"name":s.device_name,"created_at":s.created_at,"expires_at":s.refresh_expires_at,"current":s.id==p.session_id})).collect::<Vec<_>>())))
 }
 pub async fn revoke(
     State(state): State<AppState>,

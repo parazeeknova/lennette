@@ -4,6 +4,7 @@ pub mod billing_holds;
 pub mod changes;
 pub mod identities;
 pub mod mutations;
+pub mod object_uploads;
 pub mod records;
 pub mod reservations;
 pub mod sessions;

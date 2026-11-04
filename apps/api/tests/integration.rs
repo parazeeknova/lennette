@@ -22,13 +22,17 @@ use secrecy::SecretString;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use uuid::Uuid;
+#[path = "common/browser.rs"]
+mod browser;
+#[path = "common/r2.rs"]
+mod r2;
 #[path = "common/scenarios.rs"]
 mod scenarios;
 
 async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
     static MIGRATION: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
     let empty = || SecretString::from(String::new());
-    let state = AppState::connect(Config {
+    let mut state = AppState::connect(Config {
         bind: "127.0.0.1:0".parse().unwrap(),
         public_url: "http://127.0.0.1:8090".parse().unwrap(),
         website_url: "https://lennette.itssingularity.com".parse().unwrap(),
@@ -50,11 +54,15 @@ async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
         dodo_url: "http://127.0.0.1:1/".parse().unwrap(),
         dodo_standard_product: "pdt_standard".into(),
         dodo_plus_product: "pdt_plus".into(),
-        attachment_dir: std::env::temp_dir().join(format!("lennette-test-{}", Uuid::new_v4())),
+        r2: None,
+        clamd_address: Some(r2::scanner().await),
+        trusted_proxy_ips: vec![],
         mobile_redirects: vec![],
     })
     .await
     .unwrap();
+    std::sync::Arc::get_mut(&mut state.0).unwrap().attachments =
+        Some(std::sync::Arc::new(object_store::memory::InMemory::new()));
     MIGRATION
         .get_or_init(|| async { Migrator::up(&state.db, None).await.unwrap() })
         .await;
@@ -123,9 +131,6 @@ async fn cleanup(state: AppState, id: Uuid) {
         .exec(&state.db)
         .await
         .unwrap();
-    tokio::fs::remove_dir_all(&state.config.attachment_dir)
-        .await
-        .ok();
     state.redis.quit().await.ok();
     state.db.clone().close().await.ok();
 }

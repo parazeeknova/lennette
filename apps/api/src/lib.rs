@@ -4,6 +4,8 @@ pub mod http;
 pub mod persistence;
 pub mod providers;
 pub mod runtime;
+pub mod security;
+pub mod storage;
 pub mod sync;
 // Preserve API paths for the binary, shared tests, and existing callers.
 pub use billing::plans;

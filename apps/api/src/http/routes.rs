@@ -26,6 +26,8 @@ use tower_http::{
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/me", get(me).delete(sync::delete_account))
+        .route("/account/events", get(super::events::stream))
+        .route("/browser/activity", post(auth::browser::activity))
         .route("/auth/logout", post(auth::logout))
         .route("/devices", get(auth::devices))
         .route("/devices/{id}", delete(auth::revoke))
@@ -51,6 +53,8 @@ pub fn router(state: AppState) -> Router {
         )
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::guard));
     let api=Router::new().merge(protected)
+        .route("/browser/auth/{provider}",post(auth::browser::begin))
+        .route("/browser/logout",post(auth::browser::logout_cookie))
         .route("/auth/{provider}/start",post(auth::start)).route("/auth/{provider}/callback",get(auth::callback))
         .route("/auth/exchange",post(auth::exchange)).route("/auth/refresh",post(auth::refresh))
         .route("/billing/webhook",post(billing::webhook))
@@ -58,20 +62,21 @@ pub fn router(state: AppState) -> Router {
     Router::new().nest("/v1",api)
         .route("/health/live",get(||async{StatusCode::NO_CONTENT})).route("/health/ready",get(ready))
         .layer(DefaultBodyLimit::max(4*1024*1024))
+        .layer(middleware::from_fn_with_state(state.clone(), crate::security::http::protect))
         .layer(ServiceBuilder::new().layer(tower::limit::ConcurrencyLimitLayer::new(64))
             .layer(SetRequestIdLayer::new(header::HeaderName::from_static("x-request-id"),MakeRequestUuid))
             .layer(SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION,header::COOKIE]))
-            .layer(TraceLayer::new_for_http().make_span_with(|request:&axum::http::Request<axum::body::Body>|tracing::info_span!("http_request",method=%request.method(),path=request.uri().path())))
+            .layer(TraceLayer::new_for_http().on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)).make_span_with(|request:&axum::http::Request<axum::body::Body>|tracing::info_span!("http_request",method=%request.method(),path=request.uri().path())))
             .layer(middleware::from_fn(crate::telemetry::context))
             .layer(PropagateRequestIdLayer::new(header::HeaderName::from_static("x-request-id")))
-            .layer(CorsLayer::new().allow_origin(state.config.website_url.origin().ascii_serialization().parse::<HeaderValue>().expect("validated website origin")).allow_headers([header::AUTHORIZATION,header::CONTENT_TYPE]).allow_methods([axum::http::Method::GET,axum::http::Method::POST,axum::http::Method::DELETE])))
+            .layer(CorsLayer::new().allow_credentials(true).allow_origin(state.config.website_url.origin().ascii_serialization().parse::<HeaderValue>().expect("validated website origin")).allow_headers([header::AUTHORIZATION,header::CONTENT_TYPE,header::HeaderName::from_static("x-delete-confirmation")]).allow_methods([axum::http::Method::GET,axum::http::Method::POST,axum::http::Method::DELETE])))
         .with_state(state)
 }
 async fn ready(State(state): State<AppState>) -> StatusCode {
     use fred::prelude::*;
     if state
         .db
-        .execute_unprepared("SELECT 1 FROM accounts LIMIT 1; SELECT 1 FROM billing_holds LIMIT 1")
+        .execute_unprepared("SELECT 1 FROM accounts LIMIT 1; SELECT 1 FROM billing_holds LIMIT 1; SELECT 1 FROM object_uploads LIMIT 1; SELECT 1 FROM attachment_refs LIMIT 1")
         .await
         .is_err()
         || state.redis.ping::<String>(None).await.is_err()

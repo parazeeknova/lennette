@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/desktop", "apps/api", "tools", "crates/protocol", "crates/sync-client"]
+members = ["apps/desktop", "apps/api", "tools", "crates/protocol", "crates/sync-client", "crates/attachments"]
 default-members = ["apps/desktop"]
 resolver = "3"
 

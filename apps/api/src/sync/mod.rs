@@ -1,7 +1,10 @@
+mod attachments;
+pub use attachments::{delete_account, delete_attachment, download, upload};
+
 use crate::{
     auth::{self, Principal},
     billing,
-    entities::{accounts, attachments, changes, mutations, records},
+    entities::{accounts, changes, mutations, records},
     error::{ApiError, Result},
     state::AppState,
 };
@@ -9,11 +12,11 @@ use axum::{
     Extension, Json,
     body::Bytes,
     extract::{
-        Path, Query, State,
+        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    http::{HeaderMap, header},
+    response::Response,
 };
 use fred::prelude::*;
 use futures_util::StreamExt;
@@ -62,6 +65,7 @@ pub async fn push(
     };
     let mut sequence = account.sync_sequence;
     let mut size = account.storage_bytes;
+    let mut detached = std::collections::HashSet::new();
     let mut results = Vec::new();
     let originals = request
         .mutations
@@ -261,6 +265,9 @@ pub async fn push(
         } else {
             model.insert(&tx).await?;
         }
+        detached.extend(
+            crate::storage::references::update(&tx, p.account_id, mutation.id, &data).await?,
+        );
         let event = changes::ActiveModel {
             account_id: Set(p.account_id),
             sequence: Set(sequence),
@@ -291,6 +298,10 @@ pub async fn push(
     }
     let mut account: accounts::ActiveModel = account.into();
     account.sync_sequence = Set(sequence);
+    for id in detached {
+        size =
+            size.saturating_sub(crate::storage::references::detach(&tx, p.account_id, id).await?);
+    }
     account.storage_bytes = Set(size);
     account.update(&tx).await?;
     tx.commit().await?;
@@ -422,186 +433,4 @@ async fn stream_changes(
     }.await;
     subscriber.quit().await.ok();
     result
-}
-
-#[derive(Deserialize)]
-pub struct UploadQuery {
-    pub id: Option<Uuid>,
-    pub name: String,
-    pub content_type: String,
-}
-pub async fn upload(
-    State(state): State<AppState>,
-    Extension(p): Extension<Principal>,
-    Query(q): Query<UploadQuery>,
-    body: Bytes,
-) -> Result<Json<Value>> {
-    if q.name.is_empty()
-        || q.name.len() > 200
-        || body.is_empty()
-        || body.len() > 10 * 1024 * 1024
-        || !matches!(
-            q.content_type.as_str(),
-            "application/pdf" | "image/png" | "image/jpeg" | "text/plain"
-        )
-    {
-        return Err(ApiError::BadRequest(
-            "upload a PDF, PNG, JPEG or text file up to 10 MiB".into(),
-        ));
-    }
-    let id = q.id.unwrap_or_else(Uuid::new_v4);
-    use base64::Engine;
-    use sha2::Digest;
-    let sha256 =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&body));
-    let tx = state.db.begin().await?;
-    use sea_orm::ConnectionTrait;
-    tx.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DbBackend::Postgres,
-        "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-        [id.to_string().into()],
-    ))
-    .await?;
-    let account = billing::lock_account(&tx, p.account_id).await?;
-    let (plan, _) = billing::entitlement(&tx, p.account_id).await?;
-    if let Some(existing) = attachments::Entity::find_by_id(id).one(&tx).await? {
-        if existing.account_id != p.account_id {
-            return Err(ApiError::NotFound);
-        }
-        if existing.sha256 != sha256 {
-            return Err(ApiError::Conflict);
-        }
-        return Ok(Json(json!({"id":id,"size_bytes":existing.size_bytes})));
-    }
-    let size = body.len() as i64;
-    if account.storage_bytes + size > plan.storage_bytes {
-        return Err(ApiError::PaymentRequired);
-    }
-    let path = state.config.attachment_dir.join(id.to_string());
-    use tokio::io::AsyncWriteExt;
-    let mut options = tokio::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(&path).await.map_err(anyhow::Error::from)?;
-    file.write_all(&body).await.map_err(anyhow::Error::from)?;
-    file.sync_all().await.map_err(anyhow::Error::from)?;
-    attachments::ActiveModel {
-        id: Set(id),
-        account_id: Set(p.account_id),
-        name: Set(q.name),
-        content_type: Set(q.content_type),
-        size_bytes: Set(size),
-        sha256: Set(sha256),
-        created_at: Set(chrono::Utc::now()),
-    }
-    .insert(&tx)
-    .await?;
-    let mut model: accounts::ActiveModel = account.into();
-    model.storage_bytes = Set(model.storage_bytes.clone().unwrap() + size);
-    model.update(&tx).await?;
-    tx.commit().await?;
-    Ok(Json(json!({"id":id,"size_bytes":size})))
-}
-pub async fn download(
-    State(state): State<AppState>,
-    Extension(p): Extension<Principal>,
-    Path(id): Path<Uuid>,
-) -> Result<Response> {
-    let row = attachments::Entity::find_by_id(id)
-        .filter(attachments::Column::AccountId.eq(p.account_id))
-        .one(&state.db)
-        .await?
-        .ok_or(ApiError::NotFound)?;
-    let body = tokio::fs::read(state.config.attachment_dir.join(id.to_string()))
-        .await
-        .map_err(anyhow::Error::from)?;
-    Ok((
-        [
-            (header::CONTENT_TYPE, row.content_type),
-            (header::CONTENT_DISPOSITION, "attachment".into()),
-            (
-                header::HeaderName::from_static("x-content-type-options"),
-                "nosniff".into(),
-            ),
-        ],
-        body,
-    )
-        .into_response())
-}
-pub async fn delete_attachment(
-    State(state): State<AppState>,
-    Extension(p): Extension<Principal>,
-    Path(id): Path<Uuid>,
-) -> Result<StatusCode> {
-    let tx = state.db.begin().await?;
-    let account = billing::lock_account(&tx, p.account_id).await?;
-    let row = attachments::Entity::find_by_id(id)
-        .filter(attachments::Column::AccountId.eq(p.account_id))
-        .one(&tx)
-        .await?
-        .ok_or(ApiError::NotFound)?;
-    attachments::Entity::delete_by_id(id).exec(&tx).await?;
-    let mut model: accounts::ActiveModel = account.into();
-    model.storage_bytes = Set(model
-        .storage_bytes
-        .clone()
-        .unwrap()
-        .saturating_sub(row.size_bytes));
-    model.update(&tx).await?;
-    tx.commit().await?;
-    if let Err(e) = tokio::fs::remove_file(state.config.attachment_dir.join(id.to_string())).await {
-        tracing::warn!(%e,%id,"orphan attachment needs cleanup")
-    }
-    Ok(StatusCode::NO_CONTENT)
-}
-pub async fn delete_account(
-    State(state): State<AppState>,
-    Extension(p): Extension<Principal>,
-) -> Result<StatusCode> {
-    use secrecy::ExposeSecret;
-    if let Some(sub) = crate::entities::subscriptions::Entity::find_by_id(p.account_id)
-        .one(&state.db)
-        .await?
-        && !matches!(sub.status.as_str(), "cancelled" | "expired" | "failed")
-    {
-        if state.config.dodo_key.expose_secret().is_empty() {
-            return Err(ApiError::Unavailable);
-        }
-        let response: Value = state
-            .http
-            .patch(
-                state
-                    .config
-                    .dodo_url
-                    .join(&format!("subscriptions/{}", sub.subscription_id))
-                    .map_err(anyhow::Error::from)?,
-            )
-            .bearer_auth(state.config.dodo_key.expose_secret())
-            .json(&json!({"status":"cancelled"}))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        if response["status"] != "cancelled" {
-            return Err(ApiError::BadRequest(
-                "subscription cancellation is still pending; try again after billing confirms"
-                    .into(),
-            ));
-        }
-    }
-    let rows = attachments::Entity::find()
-        .filter(attachments::Column::AccountId.eq(p.account_id))
-        .all(&state.db)
-        .await?;
-    accounts::Entity::delete_by_id(p.account_id)
-        .exec(&state.db)
-        .await?;
-    for file in rows {
-        tokio::fs::remove_file(state.config.attachment_dir.join(file.id.to_string()))
-            .await
-            .ok();
-    }
-    Ok(StatusCode::NO_CONTENT)
 }

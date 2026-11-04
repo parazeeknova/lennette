@@ -1,0 +1,280 @@
+use super::scenarios::{configured, serve};
+use super::*;
+use axum::{
+    Json,
+    extract::Form,
+    http::header,
+    routing::{get, post},
+};
+use std::collections::HashMap;
+
+async fn call(
+    app: &Router,
+    method: &str,
+    path: &str,
+    cookie: Option<&str>,
+    origin: Option<&str>,
+) -> axum::response::Response {
+    let mut request = Request::builder().method(method).uri(path);
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
+    if let Some(origin) = origin {
+        request = request.header(header::ORIGIN, origin);
+    }
+    app.clone()
+        .oneshot(request.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn auth_abuse_is_limited_by_socket_peer_and_forwarded_headers_are_untrusted() {
+    let (state, app, account, _) = fixture().await;
+    let ip = std::net::Ipv6Addr::from(Uuid::new_v4().as_u128());
+    for attempt in 0..31 {
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/v1/browser/auth/google")
+            .header("origin", "https://evil.test")
+            .header("cf-connecting-ip", format!("10.0.0.{}", attempt + 1))
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(
+                ip.into(),
+                5000,
+            )));
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            response.status(),
+            if attempt == 30 {
+                StatusCode::TOO_MANY_REQUESTS
+            } else {
+                StatusCode::UNAUTHORIZED
+            }
+        );
+        if attempt == 30 {
+            assert_eq!(response.headers()["retry-after"], "60");
+        }
+    }
+    cleanup(state, account).await;
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn browser_oauth_cookie_csrf_expiry_revocation_and_events() {
+    let (original, _, fixture_id, _) = fixture().await;
+    let profile = json!({"sub":Uuid::new_v4().to_string(),"email":"browser@example.test","email_verified":true,"name":"Browser Test"});
+    let mock = Router::new()
+        .route(
+            "/token",
+            post(|Form(_): Form<HashMap<String, String>>| async {
+                Json(json!({"access_token":"mock-provider"}))
+            }),
+        )
+        .route(
+            "/userinfo",
+            get(move || {
+                let profile = profile.clone();
+                async move { Json(profile) }
+            }),
+        );
+    let (base, task) = serve(mock).await;
+    let mut config = original.config.clone();
+    config.google = Some(lennette_server::config::OAuthConfig {
+        client_id: "test".into(),
+        client_secret: "test-secret".to_owned().into(),
+        token_url: format!("{base}/token"),
+        userinfo_url: format!("{base}/userinfo"),
+        emails_url: None,
+    });
+    let state = configured(&original, config);
+    let mut events_ready = state.events.subscribe();
+    lennette_server::http::events::start(state.clone());
+    tokio::time::timeout(std::time::Duration::from_secs(3), events_ready.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let app = routes::router(state.clone());
+    let origin = state.config.website_url.origin().ascii_serialization();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/browser/auth/google",
+            None,
+            Some("https://evil.test")
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let started = call(&app, "POST", "/v1/browser/auth/google", None, Some(&origin)).await;
+    assert_eq!(started.status(), StatusCode::OK);
+    let binding = started.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let value: Value =
+        serde_json::from_slice(&started.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let authorization: url::Url = value["authorization_url"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let params: HashMap<_, _> = authorization.query_pairs().into_owned().collect();
+    let callback = format!(
+        "/v1/auth/google/callback?state={}&code=mock",
+        params["state"]
+    );
+    let response = call(&app, "GET", &callback, Some(&binding), None).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let cookie = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .find(|v| v.to_str().unwrap().starts_with("lennette-dev="))
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        cookie.contains("HttpOnly")
+            && cookie.contains("SameSite=Lax")
+            && !cookie.contains("Domain=")
+    );
+    let cookie = cookie.split(';').next().unwrap().to_owned();
+    assert!(
+        !response.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .contains("ticket")
+    );
+    let me = call(&app, "GET", "/v1/me", Some(&cookie), None).await;
+    assert_eq!(me.status(), StatusCode::OK);
+    let value: Value =
+        serde_json::from_slice(&me.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let account: Uuid = value["id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/browser/activity",
+            Some(&cookie),
+            Some("https://evil.test")
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/browser/activity",
+            Some(&cookie),
+            Some(&origin)
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let response = call(
+        &app,
+        "GET",
+        "/v1/account/events",
+        Some(&cookie),
+        Some(&origin),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut stream = response.into_body().into_data_stream();
+    use futures_util::StreamExt;
+    let connected = stream.next().await.unwrap().unwrap();
+    assert!(String::from_utf8_lossy(&connected).contains("changed"));
+    accounts::Entity::update_many()
+        .col_expr(
+            accounts::Column::DisplayName,
+            sea_orm::sea_query::Expr::value("Changed by a second device"),
+        )
+        .filter(accounts::Column::Id.eq(account))
+        .exec(&state.db)
+        .await
+        .unwrap();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&event).contains("account"));
+    drop(stream);
+    assert_eq!(
+        call(&app, "DELETE", "/v1/me", Some(&cookie), Some(&origin))
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let token = cookie.split_once('=').unwrap().1;
+    let key = format!("browser:{}", auth::digest(token));
+    let raw: String = state.redis.get(&key).await.unwrap();
+    let mut session: Value = serde_json::from_str(&raw).unwrap();
+    session["created"] = json!(Utc::now().timestamp() - 13 * 3600);
+    state
+        .redis
+        .set::<(), _, _>(
+            &key,
+            session.to_string(),
+            Some(Expiration::EX(1800)),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        call(&app, "GET", "/v1/me", Some(&cookie), None)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    state.shutdown.cancel();
+    session["created"] = json!(Utc::now().timestamp());
+    state
+        .redis
+        .set::<(), _, _>(
+            &key,
+            session.to_string(),
+            Some(Expiration::EX(1800)),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/browser/logout",
+            Some(&cookie),
+            Some(&origin)
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(&app, "GET", "/v1/me", Some(&cookie), None)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    task.abort();
+    accounts::Entity::delete_by_id(account)
+        .exec(&state.db)
+        .await
+        .unwrap();
+    cleanup(original, fixture_id).await;
+}

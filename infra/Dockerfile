@@ -13,7 +13,7 @@ RUN cargo build --locked --release -p lennette-server
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home lennette \
-    && mkdir -p /data/attachments && chown -R lennette:lennette /data
+    && mkdir -p /data && chown lennette:lennette /data
 COPY --from=builder /workspace/target/release/lennette-server /usr/local/bin/lennette-server
 USER lennette
 WORKDIR /data

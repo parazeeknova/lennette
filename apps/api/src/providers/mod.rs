@@ -1,5 +1,4 @@
 mod batch;
-pub use batch::transcribe;
 use crate::{
     auth::{self, Principal},
     billing,
@@ -17,6 +16,7 @@ use axum::{
     http::header,
     response::{IntoResponse, Response},
 };
+pub use batch::transcribe;
 use fred::prelude::*;
 use futures_util::{SinkExt, StreamExt};
 use secrecy::ExposeSecret;

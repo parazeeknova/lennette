@@ -1,4 +1,3 @@
-pub mod plans;
 use crate::{
     auth::Principal,
     entities::{
@@ -182,8 +181,9 @@ pub async fn usage(
         .one(&state.db)
         .await?
         .ok_or(ApiError::Unauthorized)?;
+    let limits = sub.as_ref().and_then(|s| plans::plan(&s.plan));
     Ok(Json(
-        json!({"subscription":sub.map(|s|json!({"plan":s.plan,"status":s.status,"period_start":s.period_start,"period_end":s.period_end})),"ai_used_microdollars":bucket.as_ref().map_or(0,|b|b.ai_spent),"transcription_seconds":bucket.as_ref().map_or(0,|b|b.speech_seconds),"storage_bytes":account.storage_bytes}),
+        json!({"subscription":sub.map(|s|json!({"plan":s.plan,"status":s.status,"period_start":s.period_start,"period_end":s.period_end})),"limits":limits,"ai_used_microdollars":bucket.as_ref().map_or(0,|b|b.ai_spent),"transcription_seconds":bucket.as_ref().map_or(0,|b|b.speech_seconds),"storage_bytes":account.storage_bytes}),
     ))
 }
 #[derive(Deserialize)]
@@ -219,7 +219,7 @@ pub async fn checkout(
     let return_url = state
         .config
         .website_url
-        .join("/downloads")
+        .join("/account")
         .map_err(anyhow::Error::from)?;
     let response:Value=state.http.post(state.config.dodo_url.join("checkouts").map_err(anyhow::Error::from)?).bearer_auth(state.config.dodo_key.expose_secret())
         .json(&json!({"product_cart":[{"product_id":product,"quantity":1}],"customer":{"email":account.email,"name":account.display_name},"metadata":{"account_id":p.account_id.to_string()},"return_url":return_url.as_str()})).send().await?.error_for_status()?.json().await?;
@@ -231,6 +231,9 @@ pub async fn portal(
     State(state): State<AppState>,
     Extension(p): Extension<Principal>,
 ) -> Result<Json<Value>> {
+    state
+        .limit(format!("portal:{}", p.account_id), 5, 60)
+        .await?;
     let sub = subscriptions::Entity::find_by_id(p.account_id)
         .one(&state.db)
         .await?
@@ -528,3 +531,4 @@ mod tests {
         assert!(verify_webhook(&secret, &HeaderMap::new(), b"{}", 1000).is_err());
     }
 }
+pub mod plans;

@@ -15,6 +15,9 @@ pub struct Inner {
     pub redis: Client,
     pub http: reqwest::Client,
     pub shutdown: tokio_util::sync::CancellationToken,
+    pub attachments: Option<Arc<dyn object_store::ObjectStore>>,
+    pub upload_permits: Arc<tokio::sync::Semaphore>,
+    pub events: tokio::sync::broadcast::Sender<uuid::Uuid>,
 }
 impl std::ops::Deref for AppState {
     type Target = Inner;
@@ -45,13 +48,20 @@ impl AppState {
             .user_agent("Lennette-managed/0.1")
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
-        tokio::fs::create_dir_all(&config.attachment_dir).await?;
+        let attachments = config
+            .r2
+            .as_ref()
+            .map(crate::storage::connect)
+            .transpose()?;
         Ok(Self(Arc::new(Inner {
             config,
             db,
             redis,
             http,
             shutdown: tokio_util::sync::CancellationToken::new(),
+            attachments,
+            upload_permits: Arc::new(tokio::sync::Semaphore::new(2)),
+            events: tokio::sync::broadcast::channel(256).0,
         })))
     }
     pub async fn limit(&self, key: String, max: i64, seconds: i64) -> Result<()> {

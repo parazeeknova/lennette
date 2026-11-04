@@ -36,8 +36,7 @@ const MeetingPreview = () => (
   <div className="account-scene account-scene-meeting" aria-hidden="true">
     <div className="account-mini-window">
       <div className="account-window-top">
-        <span className="account-live-dot" /> LIVE TRANSCRIPT{" "}
-        <span className="ml-auto opacity-50">00:42</span>
+        LIVE TRANSCRIPT <span className="ml-auto opacity-50">00:42</span>
       </div>
       <div className="account-wave">
         {Array.from({ length: 19 }, (_, i) => (
@@ -66,9 +65,7 @@ const MeetingPreview = () => (
 const SyncPreview = () => (
   <div className="account-scene account-scene-sync" aria-hidden="true">
     <div className="account-desktop">
-      <div className="account-window-top">
-        YOUR MEETING <span className="account-live-dot ml-auto" />
-      </div>
+      <div className="account-window-top">YOUR MEETING</div>
       <div className="account-text-lines">
         <i />
         <i />
@@ -156,7 +153,7 @@ export const AccountWelcome = ({
               type="button"
               disabled={busy}
               onClick={() => onSignIn("google")}
-              className="account-provider"
+              className="glass btn-liquid w-full glass-pill text-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-deep disabled:cursor-wait disabled:opacity-50"
             >
               <GoogleMark />
               <span>Continue with Google</span>
@@ -165,7 +162,7 @@ export const AccountWelcome = ({
               type="button"
               disabled={busy}
               onClick={() => onSignIn("github")}
-              className="account-provider"
+              className="glass btn-liquid w-full glass-pill text-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-deep disabled:cursor-wait disabled:opacity-50"
             >
               <GithubMark />
               <span>Continue with GitHub</span>
@@ -216,10 +213,7 @@ export const AccountWelcome = ({
               "Bring your history, prompts, and supported attachments together. You choose whether to import existing local history.",
           },
         ].map(({ Preview, title, description }) => (
-          <article
-            key={title}
-            className="account-feature glass overflow-hidden rounded-3xl"
-          >
+          <article key={title} className="glass overflow-hidden rounded-3xl">
             <Preview />
             <div className="relative px-6 pt-2 pb-8">
               <h3 className="font-display text-2xl leading-tight">{title}</h3>

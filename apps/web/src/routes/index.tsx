@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import skyHero from "@/assets/sky-hero.jpg";
+import { FaqAccordion } from "@/components/faq-accordion";
 import { SiteFooter, SiteNav } from "@/components/page-shell";
 import { PlatformDownload } from "@/components/platform-download";
 import { HOME_FAQS } from "@/lib/faqs";
@@ -388,32 +389,7 @@ const Faq = () => (
         of your notes.
       </p>
 
-      <div className="mt-14 border-t border-ink/10">
-        {HOME_FAQS.map((faq, index) => (
-          <details
-            key={faq.question}
-            className="group border-b border-ink/10"
-            open={index === 0}
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-8 py-5 text-left text-lg font-medium text-ink transition-colors hover:text-sky-deep">
-              <span>{faq.question}</span>
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="size-5 shrink-0 text-ink-soft transition-transform duration-300 group-open:rotate-180"
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </summary>
-            <p className="max-w-2xl pb-6 text-ink-soft">{faq.answer}</p>
-          </details>
-        ))}
-      </div>
+      <FaqAccordion items={HOME_FAQS} />
 
       <a
         href={GITHUB_URL}

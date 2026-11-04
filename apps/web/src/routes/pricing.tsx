@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { FaqAccordion } from "@/components/faq-accordion";
 import { PageShell } from "@/components/page-shell";
 import { WaitlistDialog } from "@/components/waitlist-dialog";
 import { PRICING_FAQS } from "@/lib/faqs";
@@ -217,16 +218,7 @@ const PricingPage = () => {
         <h2 className="font-display text-2xl text-ink">
           Questions about pricing
         </h2>
-        <div className="mt-6 flex flex-col gap-6">
-          {PRICING_FAQS.map((faq) => (
-            <div key={faq.question}>
-              <h3 className="font-medium text-ink">{faq.question}</h3>
-              <p className="mt-1.5 max-w-2xl leading-relaxed text-ink-soft">
-                {faq.answer}
-              </p>
-            </div>
-          ))}
-        </div>
+        <FaqAccordion items={PRICING_FAQS} />
       </section>
 
       <WaitlistDialog

@@ -358,40 +358,6 @@ details > summary::-webkit-details-marker {
 .account-welcome {
   background-color: oklch(0.96 0.025 235 / 0.45);
 }
-.account-provider {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  border: 1px solid oklch(1 0 0 / 0.9);
-  border-radius: 999px;
-  background: oklch(1 0 0 / 0.75);
-  padding: 0.9rem 1rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  box-shadow: 0 4px 12px oklch(0.4 0.05 240 / 0.06);
-  transition:
-    background 180ms,
-    transform 180ms;
-  &:hover:not(:disabled) {
-    background: white;
-    transform: translateY(-2px);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--sky-deep);
-    outline-offset: 4px;
-  }
-  &:disabled {
-    opacity: 0.5;
-    cursor: wait;
-  }
-}
-.account-feature {
-  transition: transform 300ms;
-}
-.account-feature:hover {
-  transform: translateY(-5px);
-}
 .account-scene {
   position: relative;
   display: flex;
@@ -432,15 +398,6 @@ details > summary::-webkit-details-marker {
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--sky-deep);
-}
-.account-live-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: #459b89;
-  box-shadow: 0 0 0 3px #459b8915;
 }
 .account-wave {
   display: flex;
@@ -601,14 +558,7 @@ details > summary::-webkit-details-marker {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .account-scene *,
-  .account-feature,
-  .account-provider {
+  .account-scene * {
     animation: none !important;
-    transition: none !important;
-  }
-  .account-feature:hover,
-  .account-provider:hover:not(:disabled) {
-    transform: none;
   }
 }

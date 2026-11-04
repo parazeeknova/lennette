@@ -19,6 +19,8 @@ enum EditTarget {
     Setting(&'static str),
 }
 
+#[path = "account_banner.rs"]
+mod account_banner;
 #[path = "history.rs"]
 mod history;
 #[path = "meeting_tone.rs"]
@@ -2840,6 +2842,7 @@ impl Render for DashboardView {
                                 .w(self.content_width)
                                 .flex_shrink_0()
                                 .min_w(px(0.0))
+                                .children(self.account_banner(cx))
                                 .child(if self.dashboard.route().is_setting() {
                                     self.body(window, cx)
                                 } else {

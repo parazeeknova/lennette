@@ -3,6 +3,24 @@
 <p align="center">An ambient real-time meeting and discussion copilot.<br />Live transcripts, useful context, and answers when you need them. Built with Rust + GPUI.</p>
 
 
+### Local workspace
+
+Run `bun install --frozen-lockfile`, start Docker Desktop, then run `bun dev`
+from the repository root. This starts the local PostgreSQL/Redis containers,
+applies migrations, and runs the API and landing together. `bun run dev:web`,
+`bun run dev:api`, and `bun run dev:desktop` run individual apps.
+
+Each app commits safe defaults in `.env.development`. Development commands use
+`cross-env` and a shared environment loader, with root `.env.local`
+overriding app defaults. That local file is optional and ignored; copy
+`.env.local.example` when adding real provider credentials or personal overrides.
+The loader reads `.env.development` and the optional root `.env.local` explicitly.
+Only `VITE_`-prefixed variables should contain values intended for the browser.
+
+Local Compose contains only PostgreSQL and Redis. Configure the production API,
+secrets, persistent attachment storage, migrations, and ingress in Dokploy;
+`infra/Dockerfile` remains available to build the API image there.
+
 ### What it does
 
 - **Listen to both sides.** Microphone and system-audio transcription with separate speaker context.

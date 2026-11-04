@@ -101,33 +101,6 @@ pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui:
             .child(action("account-refresh",theme,if view.account_busy(){"Updating…"}else{"Refresh usage"},cx,|view:&mut View,cx,_|view.refresh_account_usage(cx)))
             .child(action("account-signout",theme,"Disconnect device",cx,|view:&mut View,cx,_|view.sign_out_account(cx))))
             .child(help_text(theme,"Disconnecting stops sync on this device. It does not delete local history or cancel your subscription."));
-        let mut models = div().flex().flex_wrap().gap(px(8.0));
-        for (index, (id, label)) in [
-            ("openai/gpt-6-luna", "Luna"),
-            ("anthropic/claude-haiku-5-5", "Haiku"),
-            ("deepseek/deepseek-v4.1-flash", "DeepSeek Flash"),
-            ("google/gemini-3.5-flash-lite", "Gemini Lite"),
-            ("google/gemini-3.8-flash", "Gemini Flash"),
-            ("anthropic/claude-sonnet-5-5", "Sonnet · Plus"),
-            ("openai/gpt-6.1-sol", "Sol · Plus"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            models = models.child(action(
-                ("managed-model", index),
-                theme,
-                label,
-                cx,
-                move |view: &mut View, cx, _| {
-                    view.select_managed_model(id);
-                    cx.notify();
-                },
-            ));
-        }
-        card=card.child(div().border_t_1().border_color(theme.border).pt(px(16.0)).flex().flex_col().gap(px(10.0))
-            .child(copy(theme,"Managed AI","Choose the model for your next answer. Availability and usage depend on your plan."))
-            .child(models));
         if crate::managed::status().to_lowercase().contains("conflict") {
             card = card.child(row(
                 theme,

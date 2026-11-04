@@ -394,14 +394,6 @@ impl DashboardView {
             .ok();
         }));
     }
-    pub fn select_managed_model(&mut self, id: &str) {
-        if let Some(db) = &self.database {
-            self.account_note = crate::db::settings::set(db.connection(), "chat_model", id)
-                .err()
-                .map(|e| e.to_string())
-                .or_else(|| Some(format!("Managed model: {id}")));
-        }
-    }
     pub fn resolve_account_conflicts(&mut self, keep_local: bool, cx: &mut Context<Self>) {
         if self.account_task.is_some() {
             return;

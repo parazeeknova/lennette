@@ -338,6 +338,7 @@ fn speech_control(text: &str) -> Option<&'static str> {
     }
     match object.get("type")?.as_str()? {
         "KeepAlive" => Some(r#"{"type":"KeepAlive"}"#),
+        "Finalize" => Some(r#"{"type":"Finalize"}"#),
         "CloseStream" => Some(r#"{"type":"CloseStream"}"#),
         _ => None,
     }
@@ -431,6 +432,10 @@ mod tests {
         assert_eq!(
             speech_control(r#"{"type":"CloseStream"}"#),
             Some(r#"{"type":"CloseStream"}"#)
+        );
+        assert_eq!(
+            speech_control(r#"{"type":"Finalize"}"#),
+            Some(r#"{"type":"Finalize"}"#)
         );
         for value in [
             r#"{"type":"KeepAlive","extra":true}"#,

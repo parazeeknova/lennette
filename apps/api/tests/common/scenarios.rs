@@ -611,6 +611,7 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
             while let Some(Ok(message))=socket.recv().await{match message{
                 Message::Binary(_)=>{socket.send(Message::Text(json!({"type":"Results","channel_index":[0,2],"is_final":true,"speech_final":true,"channel":{"alternatives":[{"transcript":"Live meeting words","words":[]}]}}).to_string().into())).await.ok();},
                 Message::Text(text) if text==r#"{"type":"KeepAlive"}"# => { socket.send(Message::Text(json!({"type":"Metadata","keepalive_received":true}).to_string().into())).await.unwrap(); },
+                Message::Text(text) if text==r#"{"type":"Finalize"}"# => { socket.send(Message::Text(json!({"type":"Metadata","finalize_received":true}).to_string().into())).await.unwrap(); },
                 Message::Close(_)=>break,_=>{},
             }}
         })
@@ -705,6 +706,13 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
     assert!(
         matches!(tokio_tungstenite::connect_async(duplicate).await,Err(tokio_tungstenite::tungstenite::Error::Http(response)) if response.status()==StatusCode::TOO_MANY_REQUESTS)
     );
+    desktop
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            r#"{"type":"Finalize"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next_json(&mut desktop).await["finalize_received"], true);
     desktop.close(None).await.ok();
     mobile.close(None).await.ok();
     assert!(

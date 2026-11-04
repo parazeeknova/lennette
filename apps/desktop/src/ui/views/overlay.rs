@@ -334,6 +334,8 @@ pub struct Overlay {
     services: crate::app::Services,
     database: Option<std::rc::Rc<crate::db::Database>>,
     configuration_version: Option<(i64, Option<std::time::SystemTime>, u64)>,
+    managed_session: Option<lennette_sync_client::Client>,
+    managed_model_labels: std::collections::HashMap<String, String>,
     mode: Mode,
     size: OverlaySize,
     conversation: Conversation,
@@ -607,6 +609,8 @@ impl Overlay {
             services,
             database,
             configuration_version: None,
+            managed_session: None,
+            managed_model_labels: std::collections::HashMap::new(),
             mode: Mode::default(),
             size: OverlaySize::default(),
             conversation: Conversation::new(),
@@ -2931,7 +2935,24 @@ impl Overlay {
 
     /// Sync settings (theme and transparency) in real-time.
     pub fn sync_settings(&mut self) -> bool {
-        if self.refreshed_at.elapsed() < std::time::Duration::from_secs(1) {
+        let session = crate::managed::active();
+        let account_changed = match (&self.managed_session, &session) {
+            (None, None) => false,
+            (Some(old), Some(new)) => !old.same_session(new),
+            _ => true,
+        };
+        if account_changed {
+            self.managed_session = session;
+            self.configuration_version = None;
+            self.catalog_task = None;
+            self.catalog_loading = false;
+            self.catalog_choices.clear();
+            self.catalog_status = None;
+            self.managed_model_labels.clear();
+            self.model_provider = None;
+            self.model = None;
+        }
+        if !account_changed && self.refreshed_at.elapsed() < std::time::Duration::from_secs(1) {
             return false;
         }
         // SQLite data_version changes when another connection commits. An idle
@@ -2994,19 +3015,20 @@ impl Overlay {
             self.settings_theme = settings.theme;
             self.theme = Theme::from_settings(&settings);
         }
-        before
-            != (
-                self.opacity,
-                self.font_scale,
-                self.settings_theme,
-                self.chat_choices.clone(),
-                self.speech_ready,
-                self.prompt_choices.clone(),
-                self.runtime_settings.clone(),
-                self.active_profile.clone(),
-                self.profile_choices.clone(),
-                self.provider_names.clone(),
-            )
+        account_changed
+            || before
+                != (
+                    self.opacity,
+                    self.font_scale,
+                    self.settings_theme,
+                    self.chat_choices.clone(),
+                    self.speech_ready,
+                    self.prompt_choices.clone(),
+                    self.runtime_settings.clone(),
+                    self.active_profile.clone(),
+                    self.profile_choices.clone(),
+                    self.provider_names.clone(),
+                )
     }
 
     fn refresh_configuration(&mut self) {
@@ -3055,6 +3077,28 @@ impl Overlay {
             .filter(|c| c.is_usable())
             .map(|c| (c.id, c.model))
             .collect();
+        if let Some(config) = crate::managed::chat_config() {
+            let provider = crate::managed::catalog::PROVIDER.to_owned();
+            self.provider_names
+                .insert(provider.clone(), "Lennette".into());
+            self.chat_choices = self
+                .catalog_choices
+                .iter()
+                .filter(|(id, _)| id == &provider)
+                .cloned()
+                .collect();
+            if self.chat_choices.is_empty() {
+                self.chat_choices
+                    .push((provider.clone(), config.model.clone()));
+            }
+            self.model_provider = Some(provider);
+            self.model = self
+                .chat_choices
+                .iter()
+                .find(|(_, model)| model == &config.model)
+                .or_else(|| self.chat_choices.first())
+                .map(|(_, model)| model.clone());
+        }
         if !self
             .chat_choices
             .iter()
@@ -3107,7 +3151,12 @@ impl Overlay {
     }
 
     fn selected_chat_config(&self) -> Option<crate::features::providers::ProviderConfig> {
-        if let Some(config) = crate::managed::chat_config() {
+        if let Some(mut config) = crate::managed::chat_config() {
+            if self.model_provider.as_deref() == Some(crate::managed::catalog::PROVIDER)
+                && let Some(model) = &self.model
+            {
+                config.model.clone_from(model);
+            }
             return Some(config);
         }
         let vault = self.services.vault.as_ref().as_ref()?;
@@ -3850,7 +3899,32 @@ impl Overlay {
     }
 
     fn load_model_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
+        self.sync_settings();
         if self.catalog_loading {
+            return;
+        }
+        if let Some(client) = crate::managed::active() {
+            self.catalog_loading = true;
+            self.catalog_status = None;
+            self.catalog_task = Some(cx.spawn(async move |this, cx| {
+                let result = crate::managed::catalog::models(&client).await;
+                this.update(cx, |this, cx| {
+                    // A response from an earlier login must never replace the
+                    // new account's model list or leak into local-only mode.
+                    if !crate::managed::active()
+                        .is_some_and(|current| client.same_session(&current))
+                    {
+                        return;
+                    }
+                    this.catalog_loading = false;
+                    match result {
+                        Ok(models) => this.apply_managed_models(models),
+                        Err(error) => this.catalog_status = Some(error),
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }));
             return;
         }
         let configs: Vec<_> = self
@@ -3891,6 +3965,9 @@ impl Overlay {
             .await;
             this.update(cx, |this, cx| {
                 let mut errors = Vec::new();
+                if crate::managed::active().is_some() {
+                    return;
+                }
                 for (id, result) in results {
                     match result {
                         Ok(models) => {
@@ -3914,6 +3991,48 @@ impl Overlay {
             })
             .ok();
         }));
+    }
+
+    fn apply_managed_models(&mut self, models: Vec<crate::managed::catalog::Model>) {
+        let provider = crate::managed::catalog::PROVIDER.to_owned();
+        self.provider_names
+            .insert(provider.clone(), "Lennette".into());
+        self.catalog_choices = models
+            .iter()
+            .map(|m| (provider.clone(), m.id.clone()))
+            .collect();
+        self.managed_model_labels = models
+            .into_iter()
+            .map(|m| (m.id, format!("{} · {}×", m.name, m.multiplier)))
+            .collect();
+        self.chat_choices = self.catalog_choices.clone();
+        let selected = self
+            .model
+            .as_ref()
+            .filter(|model| self.chat_choices.iter().any(|(_, id)| id == *model))
+            .cloned()
+            .or_else(|| self.chat_choices.first().map(|(_, model)| model.clone()));
+        self.model_provider = Some(provider);
+        if let Some(model) = selected {
+            self.model = Some(model.clone());
+            self.persist_managed_model(&model);
+        }
+    }
+
+    fn persist_managed_model(&mut self, model: &str) {
+        if let Some(db) = &self.database {
+            if crate::db::settings::get(db.connection(), "chat_model")
+                .ok()
+                .flatten()
+                .as_deref()
+                == Some(model)
+            {
+                return;
+            }
+            if let Err(error) = crate::db::settings::set(db.connection(), "chat_model", model) {
+                self.chat_error = Some(format!("Could not save the selected model: {error}"));
+            }
+        }
     }
 
     fn cancel_dictation(&mut self) {
@@ -4096,7 +4215,14 @@ impl Overlay {
     }
 
     fn model_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let label = crate::ai::models::label(self.model.as_deref(), self.model_provider.as_deref());
+        let label = self
+            .model
+            .as_ref()
+            .and_then(|model| self.managed_model_labels.get(model))
+            .cloned()
+            .unwrap_or_else(|| {
+                crate::ai::models::label(self.model.as_deref(), self.model_provider.as_deref())
+            });
         div()
             .id("model-select")
             .occlude()
@@ -4197,6 +4323,10 @@ impl Overlay {
     pub fn select_model(&mut self, model: &str) {
         self.model = Some(model.to_owned());
         self.model_menu_open = false;
+        if self.model_provider.as_deref() == Some(crate::managed::catalog::PROVIDER) {
+            self.persist_managed_model(model);
+            return;
+        }
         if let Some(path) = self.services.database_path.as_deref()
             && let Ok(database) = crate::db::Database::open(path)
             && let Some(provider) = &self.model_provider
@@ -4218,14 +4348,14 @@ impl Overlay {
         }
     }
 
-    /// Whether the user has configured at least one usable API key for AI or Speech.
-    fn has_api_keys(&self) -> bool {
-        !self.chat_choices.is_empty() && self.speech_ready
+    /// Managed sessions use server credentials; local mode needs both key types.
+    fn has_provider_access(&self) -> bool {
+        crate::managed::active().is_some() || (!self.chat_choices.is_empty() && self.speech_ready)
     }
 
     /// Notice displayed directly above the input space when no API keys are configured.
     fn api_key_banner(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        if self.has_api_keys() {
+        if self.has_provider_access() {
             return None;
         }
         let theme = self.theme;
@@ -6789,6 +6919,66 @@ mod tests {
         .unwrap();
         overlay.refresh_configuration();
         assert!(!overlay.speech_ready);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn managed_picker_loads_without_keys_preserves_open_menu_and_local_provider_settings() {
+        let (path, mut overlay) = fixture();
+        let db = crate::db::Database::open(path.join("managed-picker.db")).unwrap();
+        crate::db::settings::set(db.connection(), "chat_provider", "gemini").unwrap();
+        overlay.database = Some(std::rc::Rc::new(db));
+        overlay.model_menu_open = true;
+        let models = || {
+            vec![
+                crate::managed::catalog::Model {
+                    id: "fast".into(),
+                    name: "Fast".into(),
+                    multiplier: 1,
+                    plus_only: false,
+                },
+                crate::managed::catalog::Model {
+                    id: "balanced".into(),
+                    name: "Balanced".into(),
+                    multiplier: 2,
+                    plus_only: false,
+                },
+            ]
+        };
+        overlay.apply_managed_models(models());
+        assert!(
+            overlay.model_menu_open,
+            "Loading the catalog must not close the dropdown"
+        );
+        assert_eq!(overlay.chat_choices.len(), 2);
+        assert_eq!(
+            overlay.model_provider.as_deref(),
+            Some(crate::managed::catalog::PROVIDER)
+        );
+        assert_eq!(overlay.managed_model_labels["balanced"], "Balanced · 2×");
+        overlay.select_model("balanced");
+        overlay.apply_managed_models(models());
+        assert_eq!(overlay.model.as_deref(), Some("balanced"));
+        let db = overlay.database.as_ref().unwrap();
+        assert_eq!(
+            crate::db::settings::get(db.connection(), "chat_model")
+                .unwrap()
+                .as_deref(),
+            Some("balanced")
+        );
+        assert_eq!(
+            crate::db::settings::get(db.connection(), "chat_provider")
+                .unwrap()
+                .as_deref(),
+            Some("gemini")
+        );
+        let vault = overlay.services.vault.as_ref().as_ref().unwrap();
+        assert!(credentials::list(vault, Kind::Chat).unwrap().is_empty());
+        // A plan change removes unavailable selections rather than retaining a
+        // model that the managed endpoint will reject.
+        overlay.apply_managed_models(vec![models().remove(0)]);
+        assert_eq!(overlay.model.as_deref(), Some("fast"));
+        overlay.database = None;
         std::fs::remove_dir_all(path).unwrap();
     }
 

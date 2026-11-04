@@ -79,12 +79,18 @@ impl Overlay {
             };
             let mut count = 0;
             for (index, (provider, model)) in choices.iter().enumerate() {
-                let label = format!(
-                    "{} · {}",
-                    self.provider_names.get(provider).unwrap_or(provider),
-                    model
-                );
-                let searchable = format!("{label} {provider}").to_lowercase();
+                let label = self
+                    .managed_model_labels
+                    .get(model)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{} · {}",
+                            self.provider_names.get(provider).unwrap_or(provider),
+                            model
+                        )
+                    });
+                let searchable = format!("{label} {provider} {model}").to_lowercase();
                 if !query
                     .split_whitespace()
                     .all(|word| searchable.contains(word))
@@ -114,7 +120,11 @@ impl Overlay {
                         .text_size(scaled(11.0))
                         .text_color(self.theme.muted_foreground)
                         .child(if choices.is_empty() {
-                            "Connect an AI in Settings."
+                            if crate::managed::active().is_some() {
+                                "Refresh to load your account's models."
+                            } else {
+                                "Connect an AI in Settings."
+                            }
                         } else {
                             "No matching models."
                         }),

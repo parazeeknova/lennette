@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 const SESSION_KEY: &str = "managed_session_v1";
 mod attachments;
+pub mod catalog;
 mod worker;
 pub use attachments::cache_attachment;
 static CLIENT: RwLock<Option<Client>> = RwLock::new(None);

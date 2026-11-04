@@ -397,6 +397,7 @@ pub struct Overlay {
     prompt_menu_open: bool,
     /// The running capture session, when Listen is active.
     session: Option<crate::features::listen::ListenSession>,
+    pending_capture: Option<crate::features::listen::SessionConfig>,
     /// Live microphone level, 0.0 to 1.0.
     level: f32,
     /// Why listening could not start, shown under the header.
@@ -663,6 +664,7 @@ impl Overlay {
             context_loading: false,
             prompt_menu_open: false,
             session: None,
+            pending_capture: None,
             level: 0.0,
             listen_error: None,
             listen_notice: None,
@@ -793,9 +795,11 @@ impl Overlay {
 
     /// Whether a live session is running.
     pub fn is_listening(&self) -> bool {
-        self.session
-            .as_ref()
-            .is_some_and(crate::features::listen::ListenSession::is_capturing)
+        self.pending_capture.is_some()
+            || self
+                .session
+                .as_ref()
+                .is_some_and(crate::features::listen::ListenSession::is_capturing)
     }
 
     /// Start capturing from the configured device.
@@ -849,8 +853,7 @@ impl Overlay {
                 .then(|| self.runtime_settings.output_device.clone()),
             speech: self.speech.clone(),
         };
-        let (session, events) = crate::features::listen::ListenSession::start(&config);
-        self.session = Some(session);
+        let events = self.prepare_capture(config);
         self.meeting_id = None;
         for event in events {
             self.handle_session_event(event);
@@ -882,6 +885,27 @@ impl Overlay {
         }
     }
 
+    fn prepare_capture(
+        &mut self,
+        config: crate::features::listen::SessionConfig,
+    ) -> Vec<crate::features::listen::SessionEvent> {
+        if config
+            .speech
+            .as_ref()
+            .is_some_and(|speech| speech.api_key == "managed-session")
+        {
+            // Reconciliation and handshakes run first, with no audio captured
+            // or queued until the managed speech endpoint is ready.
+            self.pending_capture = Some(config);
+            self.session = None;
+            Vec::new()
+        } else {
+            let (session, events) = crate::features::listen::ListenSession::start(&config);
+            self.session = Some(session);
+            events
+        }
+    }
+
     /// Play reconnects capture in the current conversation. Only New clears it.
     fn prepare_recording_resume(&mut self) -> Option<String> {
         self.meeting_offset = self.last_elapsed.max(self.meeting_offset);
@@ -904,12 +928,16 @@ impl Overlay {
         self.transcription_detached = false;
         self.transcription = Some(cx.spawn(async move |this, cx| {
             use crate::speech::transcription::{LiveEvent, LiveTranscriber};
-            let connected = LiveTranscriber::connect_config(&config).await;
+            let connected = tokio::time::timeout(std::time::Duration::from_secs(20), LiveTranscriber::connect_config(&config))
+                .await.unwrap_or_else(|_| Err(crate::speech::transcription::SttError::Socket(
+                    "Speech setup took too long. No recording was started. Try again.".into()
+                )));
             match connected {
                 Err(error) => {
                     this.update(cx, |overlay, cx| {
+                        let cancelled = overlay.pending_capture.is_none() && overlay.session.is_none();
                         overlay.stop_listening();
-                        if !overlay.transcription_detached {
+                        if !cancelled && !overlay.transcription_detached {
                             overlay.listen_error = Some(error.to_string());
                         }
                         cx.notify();
@@ -918,7 +946,15 @@ impl Overlay {
                 }
                 Ok(mut live) => {
                     this.update(cx, |overlay, cx| {
-                        overlay.live_connected = !overlay.transcription_detached;
+                        // Stop during setup clears pending_capture. A late
+                        // connection must never start the microphone again.
+                        if !overlay.transcription_detached && let Some(capture) = overlay.pending_capture.take() {
+                            let (session, events) = crate::features::listen::ListenSession::start(&capture);
+                            overlay.session = Some(session);
+                            for event in events { overlay.handle_session_event(event); }
+                            if !overlay.is_listening() { overlay.stop_listening(); }
+                        }
+                        overlay.live_connected = !overlay.transcription_detached && overlay.session.is_some();
                         cx.notify();
                     })
                     .ok();
@@ -1186,6 +1222,7 @@ impl Overlay {
     /// Stop the session. Returns the meeting that just ended, when one did,
     /// so the caller can have it named once its words are final.
     pub fn stop_listening(&mut self) -> Option<String> {
+        self.pending_capture = None;
         if self.automatic_inflight {
             self.interrupt_response();
         }
@@ -5859,6 +5896,42 @@ mod tests {
             database_ready: false,
         };
         (path, Overlay::new(services, None, None, None, None))
+    }
+
+    #[test]
+    fn managed_setup_never_queues_audio_and_stop_cancels_pending_capture() {
+        let (path, mut overlay) = fixture();
+        let events = overlay.prepare_capture(crate::features::listen::SessionConfig {
+            speech: Some(crate::ai::providers::ProviderConfig::new(
+                "deepgram-stt",
+                "managed-session",
+                "nova-3",
+            )),
+            ..Default::default()
+        });
+        assert!(events.is_empty());
+        assert!(
+            overlay.is_listening(),
+            "Connecting must remain stoppable from the play button"
+        );
+        assert!(
+            overlay.session.is_none(),
+            "No microphone may open during account sync/handshake"
+        );
+        // More pump ticks than the former 100-frame startup queue capacity.
+        for _ in 0..250 {
+            overlay.pump();
+        }
+        assert!(overlay.pending_audio.is_empty());
+        assert!(overlay.pending_capture.is_some());
+        assert_eq!(overlay.elapsed_seconds(), 0.0);
+        overlay.stop_listening();
+        assert!(
+            overlay.pending_capture.take().is_none(),
+            "Late socket readiness must not restart capture"
+        );
+        assert!(!overlay.is_listening());
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

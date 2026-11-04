@@ -3319,6 +3319,15 @@ impl Overlay {
             .into_any_element()
     }
 
+    fn show_empty_wordmark(&self) -> bool {
+        !self.is_listening()
+            && self.transcript.is_empty()
+            && self.live_interim.iter().all(|text| text.is_empty())
+            && self.conversation.messages().is_empty()
+            && self.streaming_text.is_empty()
+            && !self.chat.is_streaming()
+    }
+
     /// The live transcript, pinned to the top half of the panel so the
     /// conversation below keeps its own space.
     fn transcript_panel(&self) -> impl IntoElement {
@@ -5706,6 +5715,27 @@ impl Render for Overlay {
             .overflow_hidden()
             .p(px(1.0))
             .bg(self.surfaces().background());
+        if self.show_empty_wordmark() && !self.transparent_menu_open() {
+            // Decorative, unregistered element: no focus or pointer handlers.
+            // Absolute positioning keeps the wordmark centered in the window
+            // independently of the composer and session-pill heights.
+            root = root.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_size(px((f32::from(window.viewport_size().width) * 0.115)
+                                .clamp(56.0, 110.0)))
+                            .text_color(Theme::with_alpha(theme.foreground, 0.10))
+                            .child("lennette"),
+                    ),
+            );
+        }
         root = root.child(
             div()
                 .relative()

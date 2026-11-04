@@ -6,6 +6,7 @@ pub mod audio;
 pub mod cli;
 pub mod core;
 pub mod db;
+mod dev_lifecycle;
 pub mod features;
 pub mod identity;
 pub mod managed;

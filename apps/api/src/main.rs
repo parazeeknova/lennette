@@ -37,12 +37,30 @@ async fn main() -> anyhow::Result<()> {
         };
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
-        tokio::select! {_=tokio::signal::ctrl_c()=>{},_=terminate=>{}}
+        let lease = async {
+            let Ok(path) = std::env::var("LENNETTE_DEV_LEASE") else {
+                return std::future::pending::<()>().await;
+            };
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let alive = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age.as_secs() < 8);
+                if !alive {
+                    break;
+                }
+            }
+        };
+        tokio::select! {_=tokio::signal::ctrl_c()=>{},_=terminate=>{},_=lease=>{}}
         shutdown.cancel();
     })
     .await?;
-    if let Some(provider) = telemetry {
-        provider.shutdown()?;
+    if let Some(provider) = telemetry
+        && let Err(error) = provider.shutdown()
+    {
+        tracing::warn!(%error,"telemetry flush incomplete during shutdown");
     }
     Ok(())
 }

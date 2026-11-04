@@ -170,6 +170,7 @@ pub fn run() {
     );
 
     let application = Application::new();
+    crate::dev_lifecycle::install();
     #[cfg(target_os = "macos")]
     application.on_reopen(|cx| macos_overlay_action(cx, false));
     application
@@ -308,19 +309,16 @@ pub fn run() {
             let bind_portal = pure_wayland && !crate::features::hyprland::is_hyprland();
             let control_handle = control.ok().map(std::sync::Arc::new);
             cx.open_window(overlay_options, move |window, cx| {
-                window.set_window_title(crate::identity::NAME);
-                window.set_app_id(crate::identity::APP_ID);
-                let protected = crate::platform::window::protect_from_capture(window);
-                #[cfg(windows)]
-                if protected.is_ok() {
+                window.defer(cx, |window, cx| {
+                    if let Err(error) = crate::platform::window::protect_from_capture(window) {
+                        tracing::error!(%error,"refusing to show an unprotected window");
+                        cx.quit();
+                        return;
+                    }
+                    #[cfg(windows)]
                     crate::platform::window::set_visible(window, true);
-                }
-                if let Err(error) = protected {
-                    tracing::error!(%error, "refusing to show an unprotected window");
-                    cx.quit();
-                } else {
-                    window.activate_window();
-                }
+                    crate::platform::window::focus(window);
+                });
                 let overlay = cx.new(|_| {
                     Overlay::new(
                         services_for_overlay,

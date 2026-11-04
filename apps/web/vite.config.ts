@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import path from "node:path";
 
 import tailwindcss from "@tailwindcss/vite";
@@ -11,7 +12,7 @@ const src = path.join(import.meta.dirname, "src");
 export default defineConfig(({ command }) => ({
   // Bind all interfaces so the site is reachable from other devices on the
   // network (phone, another machine over Tailscale).
-  server: { host: true, port: 8080 },
+  server: { host: true, port: 8080, strictPort: true },
   // Vite resolves tsconfig `paths` and the `@` alias natively, so no
   // vite-tsconfig-paths plugin is needed.
   resolve: {
@@ -47,6 +48,29 @@ export default defineConfig(({ command }) => ({
   },
   css: { transformer: "lightningcss" },
   plugins: [
+    {
+      name: "lennette-dev-lifecycle",
+      configureServer(server) {
+        const lease = process.env["LENNETTE_DEV_LEASE"];
+        if (!lease) {
+          return;
+        }
+        const timer = setInterval(() => {
+          let alive = false;
+          try {
+            alive = Date.now() - statSync(lease).mtimeMs < 8000;
+          } catch {
+            /* Supervisor exited. */
+          }
+          if (!alive) {
+            clearInterval(timer);
+            void server.close().then(() => process.exit(0));
+          }
+        }, 500);
+        timer.unref();
+        server.httpServer?.once("close", () => clearInterval(timer));
+      },
+    },
     tailwindcss(),
     tanstackStart({
       // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).

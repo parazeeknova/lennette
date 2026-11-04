@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
+import { statSync } from "node:fs";
 
 function readEnv(path, optional = false) {
   try {
@@ -12,11 +13,7 @@ function readEnv(path, optional = false) {
   }
 }
 
-export function developmentEnv(
-  appDirectory,
-  rootDirectory,
-  inherited = process.env
-) {
+export function developmentEnv(appDirectory, rootDirectory, inherited = process.env) {
   const local = readEnv(new URL(".env.local", rootDirectory), true);
   const env = {
     ...readEnv(new URL(".env.development", appDirectory)),
@@ -43,10 +40,7 @@ export function developmentEnv(
   return env;
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [app, ...command] = process.argv.slice(2);
   if (!["api", "web", "desktop"].includes(app) || command.length === 0) {
     throw new Error("Usage: dev-env.mjs <api|web|desktop> <command> [args...]");
@@ -58,8 +52,34 @@ if (
     env: developmentEnv(directory, root),
     stdio: "inherit",
   });
+  let closing = false;
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    if (process.platform === "win32" && child.pid && child.exitCode === null) {
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+    } else child.kill("SIGTERM");
+  };
+  const lease = process.env.LENNETTE_DEV_LEASE;
+  let shutdownScheduled = false;
+  if (lease) {
+    setInterval(() => {
+      let alive = false;
+      try {
+        alive = Date.now() - statSync(lease).mtimeMs < 8000;
+      } catch {}
+      if (!alive && !shutdownScheduled) {
+        shutdownScheduled = true;
+        setTimeout(close, 15000).unref();
+      }
+    }, 1000).unref();
+  }
   for (const signal of ["SIGINT", "SIGTERM"]) {
     process.on(signal, () => {
+      if (lease) return; // Supervisor owns graceful shutdown and escalation.
       if (process.platform === "win32" && child.pid && child.exitCode === null) {
         // Killing only Bun leaves its Cargo/Vite descendants running on Windows.
         // Limit termination to this wrapper's own child process tree.

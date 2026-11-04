@@ -5,7 +5,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "bun run dev:setup && lerna run dev --concurrency 3 --scope lennette-web --scope @lennette/api --scope @lennette/desktop",
+    "dev": "bun --no-env-file scripts/dev.mjs",
     "dev:setup": "bun scripts/dev-setup.mjs",
     "dev:web": "bun run --cwd apps/web dev",
     "dev:api": "bun run dev:setup && bun run --cwd apps/api dev",

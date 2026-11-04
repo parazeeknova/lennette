@@ -1943,6 +1943,13 @@ impl Overlay {
                 let alive = this
                     .update(cx, |overlay, cx| {
                         let changed = overlay.sync_settings();
+                        if !overlay.quit_pending && crate::dev_lifecycle::should_stop() {
+                            overlay.interrupt_response();
+                            overlay.cancel_dictation();
+                            overlay.stop_listening();
+                            overlay.quit_pending = true;
+                            cx.notify();
+                        }
                         overlay.tick_auto_capture(cx);
                         let dictation_active = overlay.dictation.is_some();
                         overlay.pump_dictation();
@@ -5348,16 +5355,16 @@ impl Render for Overlay {
 
         let hidden = self.runtime_settings.hide_app_icon || crate::cli::private_overlay_enabled();
         if self.native_icon_hidden != Some(hidden) {
-            crate::platform::window::set_icon_hidden(window, hidden);
+            window.defer(cx, move |window, _| {
+                crate::platform::window::set_icon_hidden(window, hidden);
+            });
             self.native_icon_hidden = Some(hidden);
         }
         if self.native_always_on_top != Some(self.runtime_settings.always_on_top) {
             let above = self.runtime_settings.always_on_top;
-            if !crate::platform::window::set_always_on_top(window, above).is_yes() {
-                tracing::debug!(
-                    "The display server could not apply the overlay stacking preference"
-                );
-            }
+            window.defer(cx, move |window, _| {
+                crate::platform::window::set_always_on_top(window, above);
+            });
             self.native_always_on_top = Some(above);
         }
         // Text sizes are written in rems, so this one value scales the window.

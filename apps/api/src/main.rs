@@ -1,3 +1,4 @@
+use anyhow::Context;
 use lennette_server::{config::Config, migration::Migrator, state::AppState};
 use sea_orm_migration::MigratorTrait;
 
@@ -13,7 +14,9 @@ async fn main() -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    let listener = tokio::net::TcpListener::bind(state.config.bind).await?;
+    let listener = tokio::net::TcpListener::bind(state.config.bind)
+        .await
+        .with_context(|| format!("Cannot bind API to {}. Stop the previous API/dev process or configure a different API_BIND.", state.config.bind))?;
     tracing::info!(address = %listener.local_addr()?, "API listening");
     let shutdown = state.shutdown.clone();
     lennette_server::storage::cleanup::start(state.clone());

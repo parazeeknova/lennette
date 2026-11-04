@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
@@ -59,7 +59,18 @@ if (
     stdio: "inherit",
   });
   for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.on(signal, () => child.kill(signal));
+    process.on(signal, () => {
+      if (process.platform === "win32" && child.pid && child.exitCode === null) {
+        // Killing only Bun leaves its Cargo/Vite descendants running on Windows.
+        // Limit termination to this wrapper's own child process tree.
+        spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+      } else {
+        child.kill(signal);
+      }
+    });
   }
   child.on("error", (error) => {
     console.error(error.message);

@@ -10,6 +10,7 @@
     "dev:web": "bun run --cwd apps/web dev",
     "dev:api": "bun run dev:setup && bun run --cwd apps/api dev",
     "dev:desktop": "bun run --cwd apps/desktop dev",
+    "payments:listen": "bun --no-env-file scripts/dodo-listen.mjs",
     "build": "lerna run build --concurrency 1",
     "check": "lerna run typecheck --concurrency 1",
     "lint": "lerna run lint --concurrency 1",

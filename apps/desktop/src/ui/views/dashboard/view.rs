@@ -54,6 +54,7 @@ pub struct DashboardView {
     capture_task: Option<gpui::Task<()>>,
     native_icon_hidden: Option<bool>,
     native_always_on_top: Option<bool>,
+    native_backdrop: Option<(bool, bool, bool)>,
     update_task: Option<gpui::Task<()>>,
     update_status: Option<String>,
     update_available: bool,
@@ -140,6 +141,7 @@ impl DashboardView {
             capture_task: None,
             native_icon_hidden: None,
             native_always_on_top: None,
+            native_backdrop: None,
             update_task: None,
             update_status: None,
             update_available: false,
@@ -2659,7 +2661,19 @@ impl Render for DashboardView {
         if self.dashboard.route() == super::nav::Route::Audio && self.devices_task.is_none() {
             self.refresh_audio_devices(cx);
         }
+        self.theme = Theme::from_settings(&self.settings.settings);
         let hidden = self.settings.settings.hide_app_icon || crate::cli::private_overlay_enabled();
+        let opacity = if self.settings.settings.backdrop_blur {
+            self.settings.settings.transparency as f32 / 100.0
+        } else {
+            0.0
+        };
+        let backdrop = (
+            crate::ui::widgets::blur::enabled(opacity),
+            self.theme.foreground.r < 0.5,
+            hidden,
+        );
+
         if self.native_always_on_top != Some(self.settings.settings.always_on_top) {
             let above = self.settings.settings.always_on_top;
             window.defer(cx, move |window, _| {
@@ -2673,11 +2687,17 @@ impl Render for DashboardView {
             });
             self.native_icon_hidden = Some(hidden);
         }
+        if self.native_backdrop != Some(backdrop) {
+            let theme = self.theme;
+            window.defer(cx, move |window, _| {
+                crate::ui::widgets::blur::apply(window, theme, opacity)
+            });
+            self.native_backdrop = Some(backdrop);
+        }
         // Text sizes are written in rems, so this one value scales the window.
         window.set_rem_size(crate::ui::theme::rem_size_for(
             self.settings.settings.font_scale,
         ));
-        self.theme = Theme::from_settings(&self.settings.settings);
         let theme = self.theme;
         for editor in [
             self.settings_search.as_ref(),

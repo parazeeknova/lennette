@@ -184,7 +184,7 @@ pub fn set_always_on_top(window: &Window, above: bool) -> Applied {
 }
 
 #[cfg(windows)]
-fn win32_window(window: &Window) -> Option<windows_sys::Win32::Foundation::HWND> {
+pub(crate) fn win32_window(window: &Window) -> Option<windows_sys::Win32::Foundation::HWND> {
     match HasWindowHandle::window_handle(window).ok()?.as_raw() {
         RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as _),
         _ => None,

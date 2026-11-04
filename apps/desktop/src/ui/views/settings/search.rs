@@ -16,6 +16,11 @@ const INDEX: &[(Route, &str, &str)] = &[
     (Route::Settings, "Show borders", "outline frame corners"),
     (
         Route::Settings,
+        "Backdrop blur",
+        "frosted acrylic glass background material",
+    ),
+    (
+        Route::Settings,
         "Reduce motion",
         "animations accessibility movement",
     ),
@@ -187,12 +192,28 @@ mod tests {
     use super::*;
     #[test]
     fn searches_multiple_words_across_labels_and_synonyms() {
-        assert!(matches("voice input", "Microphone", INDEX[15].2));
+        let keywords = |title: &str| {
+            INDEX
+                .iter()
+                .find(|(_, label, _)| *label == title)
+                .unwrap()
+                .2
+        };
+        assert!(matches("voice input", "Microphone", keywords("Microphone")));
         assert!(matches(
             "stt endpoint",
             "Custom speech providers",
-            INDEX[22].2
+            keywords("Custom speech providers")
         ));
-        assert!(!matches("speaker password", "System Audio", INDEX[16].2));
+        assert!(!matches(
+            "speaker password",
+            "System Audio",
+            keywords("System Audio")
+        ));
+        assert!(matches(
+            "frosted material",
+            "Backdrop blur",
+            keywords("Backdrop blur")
+        ));
     }
 }

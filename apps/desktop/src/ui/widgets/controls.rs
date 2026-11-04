@@ -402,14 +402,12 @@ pub fn row(
 
 /// A settings section card with a heading and a divider.
 pub fn section(theme: &Theme, title: &str, description: &str) -> gpui::Div {
-    div()
+    super::panels::panel(theme)
         .flex()
         .flex_col()
         .w_full()
         .min_w(px(0.0))
         .rounded(px(radius::XL))
-        .border_1()
-        .border_color(theme.border)
         .bg(theme.card)
         .px(px(space::LG))
         .py(px(space::MD))
@@ -509,14 +507,13 @@ pub fn action<V: 'static>(
     handler: impl Fn(&mut V, &mut Context<V>, &mut Window) + 'static,
 ) -> impl IntoElement {
     div()
+        .relative()
         .flex()
         .items_center()
         .justify_center()
         .h(px(28.0))
         .px(px(space::MD))
         .rounded(px(radius::MD))
-        .border_1()
-        .border_color(theme.control_border(true))
         .bg(theme.primary_fill())
         .text_size(scaled(11.5))
         .font_weight(FontWeight::MEDIUM)
@@ -524,6 +521,7 @@ pub fn action<V: 'static>(
         .cursor_pointer()
         .id(id)
         .child(label.to_owned())
+        .child(super::material::dual_edge(*theme, radius::MD))
         .on_click(cx.listener(move |view, _, window, cx| {
             handler(view, cx, window);
             cx.notify();

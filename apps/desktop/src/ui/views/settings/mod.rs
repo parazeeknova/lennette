@@ -353,6 +353,15 @@ pub fn app_settings(
     ))
     .child(row(
         theme,
+        "Backdrop blur",
+        "Frost the desktop behind translucent surfaces. Uses your compositor; disabled at 0% and 100% opacity.",
+        switch("backdrop-blur",theme,s.backdrop_blur,cx,|view: &mut crate::ui::dashboard::view::DashboardView,_,_| {
+            view.settings_mut().settings.backdrop_blur = !view.settings_mut().settings.backdrop_blur;
+            view.save_settings();
+        }),
+    ))
+    .child(row(
+        theme,
         "Show borders",
         "Outline Lennette windows and panels",
         switch(

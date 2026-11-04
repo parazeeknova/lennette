@@ -16,10 +16,10 @@ pub use crate::ui::theme::{radius, space};
 /// A rounded container used for cards and grouped settings.
 pub fn panel(theme: &Theme) -> gpui::Div {
     div()
+        .relative()
         .rounded(px(radius::XL))
-        .border_1()
-        .border_color(theme.border)
         .bg(theme.card)
+        .child(super::material::dual_edge(*theme, radius::XL))
 }
 
 /// A card with a title, optional description and arbitrary body.

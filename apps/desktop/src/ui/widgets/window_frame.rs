@@ -1,9 +1,9 @@
 //! Shared antialiased window and composer edges.
-use gpui::{BorderStyle, IntoElement, Styled, canvas, px, quad, transparent_black};
+use gpui::IntoElement;
 
 use crate::ui::theme::{Theme, radius};
 
-/// A single antialiased stroke follows the surface curve. The
+/// Two supersampled contours follow the same surface curve. The
 /// canvas has no hitbox, so it cannot intercept resizing, dragging or clicks.
 pub fn window_edge(theme: Theme) -> impl IntoElement {
     surface_edge(theme, radius::XL)
@@ -16,29 +16,8 @@ pub fn aligned_radius(radius: f32, scale: f32) -> f32 {
 
 /// The same edge for the session pill and composer group.
 pub fn surface_edge(theme: Theme, radius: f32) -> impl IntoElement {
-    canvas(
-        |_, _, _| (),
-        move |bounds, (), window, _| {
-            let hairline = px(1.0 / window.scale_factor());
-            let outer_radius = px(aligned_radius(radius, window.scale_factor())
-                .min(f32::from(bounds.size.width.min(bounds.size.height)) / 2.0));
-            // Two adjacent one-device-pixel contours produced a dark/light
-            // staircase at fractional display scales. Keep one quiet contour,
-            // inset half its width so the antialiasing fringe isn't clipped.
-            window.paint_quad(quad(
-                bounds.inset(hairline / 2.0),
-                outer_radius - hairline / 2.0,
-                transparent_black(),
-                hairline,
-                theme.frame_border,
-                BorderStyle::Solid,
-            ));
-        },
-    )
-    .absolute()
-    .inset_0()
+    crate::ui::widgets::material::dual_edge(theme, radius)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

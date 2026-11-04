@@ -209,13 +209,21 @@ impl Render for Editor {
                 if self.dense { 8.0 } else { 12.0 },
                 window.scale_factor(),
             )))
-            .border(px(1.0 / window.scale_factor()))
-            .border_color(if focused {
-                self.theme.focus_border()
-            } else {
-                self.theme.border
-            })
-            .bg(self.theme.muted)
+            .bg(crate::ui::widgets::blur::tint(
+                self.theme,
+                crate::ui::widgets::blur::Surface::Input,
+            ))
+            .child(crate::ui::widgets::material::dual_edge(
+                if focused {
+                    Theme {
+                        frame_border: self.theme.focus_border(),
+                        ..self.theme
+                    }
+                } else {
+                    self.theme
+                },
+                if self.dense { 8.0 } else { 12.0 },
+            ))
             .text_color(if empty {
                 self.theme.muted_foreground
             } else {

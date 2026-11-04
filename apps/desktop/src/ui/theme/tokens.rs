@@ -177,11 +177,7 @@ impl Theme {
 
     /// Popups follow the same transparency policy as the rest of the app.
     pub fn popover(self) -> Rgba {
-        if self.is_glass() {
-            Self::with_alpha(self.background, 0.78)
-        } else {
-            Self::with_alpha(self.card, 0.98)
-        }
+        crate::ui::widgets::blur::tint(self, crate::ui::widgets::blur::Surface::Menu)
     }
 
     pub fn menu_hover(self) -> Rgba {

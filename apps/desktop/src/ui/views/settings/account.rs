@@ -4,12 +4,12 @@ type View = crate::ui::dashboard::view::DashboardView;
 pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui::AnyElement {
     let connected = crate::managed::active().is_some();
     let mut card = div()
+        .relative()
         .w_full()
         .p(px(24.0))
         .rounded(px(radius::LG))
-        .border_1()
-        .border_color(theme.border)
         .bg(theme.card)
+        .child(crate::ui::widgets::material::dual_edge(*theme, radius::LG))
         .flex()
         .flex_col()
         .gap(px(20.0));

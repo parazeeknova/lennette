@@ -479,6 +479,7 @@ pub struct Overlay {
     /// Whether the overlay is shown; toggled by the Toggle Window shortcut.
     window_visible: bool,
     native_always_on_top: Option<bool>,
+    native_backdrop: Option<(bool, bool, bool)>,
     /// Generated follow-up questions for this conversation.
     follow_ups: Vec<String>,
     /// Whether a follow-up request is in flight.
@@ -718,6 +719,7 @@ impl Overlay {
             transcript_tail: (0, 0),
             window_visible: true,
             native_always_on_top: None,
+            native_backdrop: None,
             native_icon_hidden: None,
             conversation_response: None,
             finishing_meeting_id: None,
@@ -2334,7 +2336,10 @@ impl Overlay {
             .h(px(40.0))
             .px(px(8.0))
             .rounded_full()
-            .bg(self.surfaces().input())
+            .bg(crate::ui::widgets::blur::tint(
+                self.theme,
+                crate::ui::widgets::blur::Surface::Pill,
+            ))
             .child(
                 div()
                     .id("window-drag-grip")
@@ -4242,7 +4247,7 @@ impl Overlay {
                         .px(px(12.0))
                         .py(px(7.0))
                         .rounded(px(radius::MD))
-                        .bg(self.surfaces().input())
+                        .bg(crate::ui::widgets::blur::tint(self.theme,crate::ui::widgets::blur::Surface::Input))
                         .border_1()
                         .border_color(self.surfaces().border())
                         .child(
@@ -4641,7 +4646,10 @@ impl Overlay {
                     .px(px(8.0))
                     .rounded(px(23.0))
                     .relative()
-                    .bg(self.surfaces().input())
+                    .bg(crate::ui::widgets::blur::tint(
+                        self.theme,
+                        crate::ui::widgets::blur::Surface::Input,
+                    ))
                     .id("composer")
                     .track_focus(&focus)
                     .cursor_text()
@@ -5354,6 +5362,12 @@ impl Render for Overlay {
         }
 
         let hidden = self.runtime_settings.hide_app_icon || crate::cli::private_overlay_enabled();
+        let backdrop = (
+            self.runtime_settings.backdrop_blur && crate::ui::widgets::blur::enabled(self.opacity),
+            self.theme.foreground.r < 0.5,
+            hidden,
+        );
+
         if self.native_icon_hidden != Some(hidden) {
             window.defer(cx, move |window, _| {
                 crate::platform::window::set_icon_hidden(window, hidden);
@@ -5366,6 +5380,18 @@ impl Render for Overlay {
                 crate::platform::window::set_always_on_top(window, above);
             });
             self.native_always_on_top = Some(above);
+        }
+        if self.native_backdrop != Some(backdrop) {
+            let theme = self.theme;
+            let opacity = if self.runtime_settings.backdrop_blur {
+                self.opacity
+            } else {
+                0.0
+            };
+            window.defer(cx, move |window, _| {
+                crate::ui::widgets::blur::apply(window, theme, opacity)
+            });
+            self.native_backdrop = Some(backdrop);
         }
         // Text sizes are written in rems, so this one value scales the window.
         window.set_rem_size(crate::ui::theme::rem_size_for(self.font_scale));

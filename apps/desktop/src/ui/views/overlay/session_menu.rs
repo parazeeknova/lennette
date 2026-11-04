@@ -10,6 +10,7 @@ pub(super) enum Dialog {
 impl Overlay {
     pub(super) fn menu_surface(&self, id: &'static str) -> gpui::Stateful<gpui::Div> {
         div()
+            .relative()
             .id(id)
             .occlude()
             .flex()
@@ -18,8 +19,7 @@ impl Overlay {
             .p(px(4.0))
             .gap(px(2.0))
             .rounded(px(10.0))
-            .border_1()
-            .border_color(self.theme.border)
+            .child(crate::ui::widgets::material::dual_edge(self.theme, 12.0))
             .bg(self.theme.popover())
             .text_color(self.theme.foreground)
             .shadow_md()

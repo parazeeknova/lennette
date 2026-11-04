@@ -1,4 +1,5 @@
-FROM rust:1.99-bookworm AS builder
+# syntax=docker/dockerfile:1
+FROM rust:1.99.1-bookworm AS builder
 WORKDIR /workspace
 COPY Cargo.toml Cargo.lock ./
 COPY apps/desktop/Cargo.toml apps/desktop/Cargo.toml
@@ -8,7 +9,9 @@ COPY tools tools
 COPY vendor vendor
 RUN mkdir -p apps/desktop/src && printf 'fn main() {}\n' > apps/desktop/src/main.rs && printf 'fn main() {}\n' > apps/desktop/build.rs \
     && mkdir -p apps/desktop/tests && printf 'fn main() {}\n' > apps/desktop/tests/macos_text.rs
-RUN cargo build --locked --release -p lennette-server
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --locked --release -p lennette-server
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -17,5 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=builder /workspace/target/release/lennette-server /usr/local/bin/lennette-server
 USER lennette
 WORKDIR /data
+ENV API_BIND=0.0.0.0:8090
 EXPOSE 8090
 ENTRYPOINT ["lennette-server"]

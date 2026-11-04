@@ -46,14 +46,14 @@ jobs:
         with:
           bun-version: 1.4.4
       - name: Install website dependencies
-        working-directory: web
+        working-directory: apps/web
         run: bun install --frozen-lockfile
       - name: Website format
-        working-directory: web
+        working-directory: apps/web
         run: bun run format:check
       - name: Website lint
-        working-directory: web
+        working-directory: apps/web
         run: bun run lint
       - name: Website typecheck
-        working-directory: web
+        working-directory: apps/web
         run: bun run typecheck

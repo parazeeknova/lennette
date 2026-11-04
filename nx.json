@@ -1,0 +1,8 @@
+{
+  "targetDefaults": {
+    "build": { "cache": false },
+    "test": { "cache": false },
+    "typecheck": { "cache": false },
+    "lint": { "cache": false }
+  }
+}

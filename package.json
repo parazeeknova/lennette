@@ -1,0 +1,23 @@
+{
+  "name": "lennette-workspace",
+  "private": true,
+  "packageManager": "bun@1.4.4",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "lerna run dev --parallel --scope lennette-web --scope @lennette/api",
+    "dev:web": "bun run --cwd apps/web dev",
+    "dev:api": "bun run --cwd apps/api dev",
+    "dev:desktop": "cargo run -p lennette",
+    "build": "lerna run build --concurrency 1",
+    "check": "lerna run typecheck --concurrency 1",
+    "lint": "lerna run lint --concurrency 1",
+    "format": "cargo fmt --all && bun run --cwd apps/web format",
+    "test": "lerna run test --concurrency 1",
+    "test:integration": "cargo test -p lennette-server --test integration -- --ignored",
+    "infra:up": "docker compose -f infra/compose.yaml up -d postgres redis",
+    "infra:down": "docker compose -f infra/compose.yaml down",
+    "db:migrate": "bun run --cwd apps/api migrate"
+  },
+  "devDependencies": { "lerna": "^10.1.1" },
+  "overrides": { "rolldown": "1.2.1" }
+}

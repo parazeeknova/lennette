@@ -76,6 +76,7 @@ beforeEach(() => {
         id: "user",
         email: "user@example.test",
         name: "Meeting User",
+        providers: ["google"],
       });
     }
     if (path === "/billing/usage") {
@@ -152,6 +153,27 @@ it("renders usage, payment management and devices, and refreshes on server event
   fireEvent.click(screen.getByRole("button", { name: "Remove" }));
   await waitFor(() =>
     expect(request).toHaveBeenCalledWith("/devices/device", "DELETE")
+  );
+});
+
+it("shows connected providers and uses an explicit linking request", async () => {
+  render(<AccountPage />);
+  await screen.findByText("Meeting User");
+  expect(
+    screen.queryByRole("button", { name: "Connect Google" })
+  ).not.toBeInTheDocument();
+  request.mockRejectedValueOnce(
+    new AccountError(
+      "Sign out and sign in again before connecting a sign-in method.",
+      400
+    )
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Connect GitHub" }));
+  await waitFor(() =>
+    expect(request).toHaveBeenCalledWith("/browser/link/github", "POST")
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Sign out and sign in again"
   );
 });
 

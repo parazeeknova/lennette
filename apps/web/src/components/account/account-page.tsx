@@ -10,11 +10,13 @@ import {
 } from "@/lib/account-api";
 
 import { AccountWelcome } from "./account-welcome";
+import { SignInMethods } from "./sign-in-methods";
 
 interface User {
   id: string;
   email: string;
   name: string;
+  providers: string[];
 }
 interface Device {
   session_id: string;
@@ -142,7 +144,18 @@ export const AccountPage = () => {
     setLoading(false);
   }, []);
   useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("link");
     queueMicrotask(() => {
+      if (result === "connected") {
+        setNotice(
+          "Sign-in method connected. You can now use either provider with this account."
+        );
+      }
+      if (result === "conflict") {
+        setNotice(
+          "That provider is already connected to a Lennette account. No accounts or data were merged."
+        );
+      }
       refresh().catch(() => setNotice("Account unavailable. Please reload."));
     });
   }, [refresh]);
@@ -198,10 +211,10 @@ export const AccountPage = () => {
     }
     setBusy(false);
   };
-  const signIn = (provider: string) =>
+  const signIn = (provider: string, flow = "auth") =>
     act(async () => {
       const result = await accountRequest<{ authorization_url: string }>(
-        `/browser/auth/${provider}`,
+        `/browser/${flow}/${provider}`,
         "POST"
       );
       const url = new URL(result.authorization_url);
@@ -266,6 +279,11 @@ export const AccountPage = () => {
               · Browser sessions expire after 30 minutes idle or 12 hours.
             </p>
           </section>
+          <SignInMethods
+            providers={snapshot.user.providers}
+            busy={busy}
+            onConnect={(provider) => signIn(provider, "link")}
+          />
           <section className={card}>
             <h2 className="mb-3 text-xl font-semibold">
               Subscription & payments

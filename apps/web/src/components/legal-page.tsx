@@ -52,8 +52,11 @@ export const LegalPage = ({ document }: { document: LegalDocument }) => (
     </div>
 
     <div className="grid items-start gap-7 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-10">
-      <aside className="glass rounded-3xl p-5 lg:sticky lg:top-8">
-        <nav aria-label="On this page">
+      <aside className="lg:sticky lg:top-8 lg:self-start">
+        <nav
+          aria-label="On this page"
+          className="glass rounded-3xl p-5 lg:max-h-[calc(100dvh-4rem)] lg:overflow-y-auto lg:overscroll-contain"
+        >
           <p className="mb-4 px-2 text-xs font-semibold tracking-widest text-sky-deep uppercase">
             On this page
           </p>

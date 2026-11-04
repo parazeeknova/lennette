@@ -256,7 +256,7 @@ export const PageShell = ({
   titleIcon?: [before: string, after: string];
   breadcrumb: string;
 }) => (
-  <main className="overflow-x-hidden bg-sky-wash">
+  <main className="overflow-x-clip bg-sky-wash">
     <SiteNav />
     <section className="px-6 pt-40 pb-16 sm:px-10">
       <div className="mx-auto max-w-5xl">

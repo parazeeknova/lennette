@@ -5,6 +5,7 @@ pub mod changes;
 pub mod identities;
 pub mod mutations;
 pub mod object_uploads;
+pub mod plan_upgrades;
 pub mod records;
 pub mod reservations;
 pub mod sessions;

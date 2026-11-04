@@ -20,6 +20,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::Sha256;
 use uuid::Uuid;
+pub mod upgrade;
 
 pub async fn entitlement(
     db: &impl sea_orm::ConnectionTrait,

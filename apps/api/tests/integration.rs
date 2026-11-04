@@ -28,6 +28,8 @@ mod browser;
 mod r2;
 #[path = "common/scenarios.rs"]
 mod scenarios;
+#[path = "common/upgrade.rs"]
+mod upgrade;
 
 async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
     static MIGRATION: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();

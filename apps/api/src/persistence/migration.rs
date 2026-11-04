@@ -9,7 +9,29 @@ impl MigratorTrait for Migrator {
             Box::new(ObjectUploads),
             Box::new(AccountEvents),
             Box::new(AttachmentRefs),
+            Box::new(PlanUpgrades),
         ]
+    }
+}
+struct PlanUpgrades;
+impl MigrationName for PlanUpgrades {
+    fn name(&self) -> &str {
+        "m20261104_006_plan_upgrades"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlanUpgrades {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(include_str!("../../migrations/006_plan_upgrades.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "payment attempt audit rollback disabled".into(),
+        ))
     }
 }
 struct AttachmentRefs;

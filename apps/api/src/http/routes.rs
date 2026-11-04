@@ -46,6 +46,8 @@ pub fn router(state: AppState) -> Router {
         .route("/billing/usage", get(billing::usage))
         .route("/billing/checkout", post(billing::checkout))
         .route("/billing/portal", post(billing::portal))
+        .route("/billing/upgrade/quote", post(billing::upgrade::quote))
+        .route("/billing/upgrade", post(billing::upgrade::confirm))
         .route("/chat/completions", post(providers::chat))
         .route("/speech/live", get(providers::speech))
         .route(

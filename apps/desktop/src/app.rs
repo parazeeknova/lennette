@@ -124,17 +124,19 @@ impl gpui::AssetSource for EmbeddedAssets {
             "lennette_footer.png" => Ok(Some(std::borrow::Cow::Borrowed(include_bytes!(
                 "assets/lennette_footer.png"
             )))),
-            _ => Ok(None),
+            _ => Ok(crate::ui::icons::model_asset(path).map(std::borrow::Cow::Borrowed)),
         }
     }
 
     fn list(&self, _path: &str) -> anyhow::Result<Vec<gpui::SharedString>> {
-        Ok(vec![
+        let mut assets = vec![
             "lennette.png".into(),
             "lennette_app_icon.png".into(),
             "lennette_header.png".into(),
             "lennette_footer.png".into(),
-        ])
+        ];
+        assets.extend(crate::ui::icons::model_paths().map(Into::into));
+        Ok(assets)
     }
 }
 

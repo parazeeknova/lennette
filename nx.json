@@ -1,5 +1,6 @@
 {
   "targetDefaults": {
+    "dev": { "cache": false, "continuous": true },
     "build": { "cache": false },
     "test": { "cache": false },
     "typecheck": { "cache": false },

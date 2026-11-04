@@ -3,7 +3,6 @@ use sea_orm_migration::MigratorTrait;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenvy::dotenv().ok();
     let telemetry = lennette_server::telemetry::init()?;
     let state = AppState::connect(Config::from_env()?).await?;
     // Explicit migration command allows a single release job before replicas start.

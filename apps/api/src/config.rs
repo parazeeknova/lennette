@@ -1,3 +1,4 @@
+use anyhow::Context;
 use secrecy::{ExposeSecret, SecretString};
 use std::{env, net::SocketAddr, path::PathBuf};
 use url::Url;
@@ -62,8 +63,12 @@ impl Config {
             bind: get("API_BIND", "127.0.0.1:8090").parse()?,
             public_url: get("API_PUBLIC_URL", "http://127.0.0.1:8090").parse()?,
             website_url: get("WEBSITE_URL", "https://lennette.itssingularity.com").parse()?,
-            database_url: SecretString::from(env::var("DATABASE_URL")?),
-            redis_url: SecretString::from(env::var("REDIS_URL")?),
+            database_url: SecretString::from(env::var("DATABASE_URL").context(
+                "DATABASE_URL is required; use `bun run dev:api` to load development settings",
+            )?),
+            redis_url: SecretString::from(env::var("REDIS_URL").context(
+                "REDIS_URL is required; use `bun run dev:api` to load development settings",
+            )?),
             google: oauth("GOOGLE"),
             github: oauth("GITHUB"),
             merge_key: secret("MERGE_API_KEY"),

@@ -4,7 +4,7 @@
   "type": "module",
   "sideEffects": false,
   "scripts": {
-    "dev": "vite dev",
+    "dev": "cross-env NODE_ENV=development bun --no-env-file ../../scripts/dev-env.mjs web vite dev",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "oxlint",

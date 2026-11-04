@@ -43,7 +43,6 @@ futures-util = "0.3"
 async-stream = "0.3"
 bytes = "1"
 hound = "3.5"
-dotenvy = "0.15"
 secrecy = { version = "0.10", features = ["serde"] }
 
 [dev-dependencies]

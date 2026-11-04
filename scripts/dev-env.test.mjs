@@ -73,3 +73,20 @@ function expectHeader(value) {
     "test@example.test:local-test-only"
   );
 }
+
+test("development origins override shared production URLs and support explicit dev overrides", () => {
+  const directory = mkdtempSync(join(tmpdir(), "lennette-origin-env-"));
+  try {
+    mkdirSync(join(directory, "api"));
+    writeFileSync(join(directory, "api", ".env.development"), "DEV_WEBSITE_URL=http://localhost:8080\nDEV_API_PUBLIC_URL=http://localhost:8090\n");
+    writeFileSync(join(directory, ".env.local"), "WEBSITE_URL=https://lennette.itssingularity.com\nAPI_PUBLIC_URL=https://lennapi.itssingularity.com\n");
+    const root = pathToFileURL(`${directory}/`);
+    const app = new URL("api/", root);
+    assert.equal(developmentEnv(app, root, {}).WEBSITE_URL, "http://localhost:8080");
+    assert.equal(developmentEnv(app, root, {}).API_PUBLIC_URL, "http://localhost:8090");
+    writeFileSync(join(directory, ".env.local"), "DEV_WEBSITE_URL=http://127.0.0.1:8080\n");
+    assert.equal(developmentEnv(app, root, {}).WEBSITE_URL, "http://127.0.0.1:8080");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

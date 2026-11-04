@@ -24,6 +24,11 @@ export function developmentEnv(
     ...local,
     NODE_ENV: "development",
   };
+  // Keep shared deployment URLs from overriding the local browser origin and
+  // OAuth callback. Custom development hosts use explicit DEV_* overrides.
+  for (const key of ["WEBSITE_URL", "API_PUBLIC_URL"]) {
+    if (env[`DEV_${key}`]) env[key] = env[`DEV_${key}`];
+  }
   if (
     !local.OTEL_EXPORTER_OTLP_HEADERS &&
     (local.OPENOBSERVE_USER_EMAIL ||

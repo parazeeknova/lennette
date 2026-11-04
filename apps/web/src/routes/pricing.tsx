@@ -5,7 +5,7 @@ import { PageShell } from "@/components/page-shell";
 import { WaitlistDialog } from "@/components/waitlist-dialog";
 import { PRICING_FAQS } from "@/lib/faqs";
 import { pageHead } from "@/lib/seo";
-import { MANAGED_PLAN } from "@/lib/site";
+import { MANAGED_PLAN, MANAGED_PLUS_PLAN } from "@/lib/site";
 
 const MANAGED_MONTHLY_PRICE = MANAGED_PLAN.price;
 
@@ -38,7 +38,7 @@ const plans: Plan[] = [
       "Your choice of supported AI models",
       "Live transcription with your Deepgram key",
       "Chat and meeting history stored locally",
-      "Windows and Linux builds",
+      "Windows, Linux and macOS builds",
     ],
     cta: {
       label: "Download Lennette",
@@ -54,11 +54,11 @@ const plans: Plan[] = [
       "The full Lennette experience, with AI answers and live transcription included in one monthly plan. No provider keys to manage.",
     note: "Planned pricing in USD. Managed access is coming soon.",
     features: [
-      "2,000 AI responses per month",
-      "30 hours of live transcription per month",
-      "Follow-up answers use your response allowance",
+      "2,000 model-weighted AI credits per month",
+      "Live meeting transcription · allowance being finalized",
+      "Luna, Haiku, DeepSeek Flash and Gemini models",
       "Speaker labels in your transcripts",
-      "Use your allowance across your devices",
+      "1 GB of synced text and attachments · 3 devices",
       "AI and transcription API costs included",
     ],
     cta: {
@@ -66,6 +66,24 @@ const plans: Plan[] = [
       waitlist: true,
     },
     emphasis: true,
+  },
+  {
+    name: MANAGED_PLUS_PLAN.name,
+    price: MANAGED_PLUS_PLAN.price,
+    cadence: "per month",
+    summary:
+      "More meeting time and AI credits, with premium models for harder questions.",
+    note: "Planned pricing in USD. Managed access is coming soon.",
+    features: [
+      "6,000 model-weighted AI credits per month",
+      "Higher meeting allowance · details being finalized",
+      "Everything in Managed, plus Sonnet and GPT Sol",
+      "5 GB of synced text and attachments · 6 devices",
+      "Live transcripts and answers across your devices",
+      "AI and transcription API costs included",
+    ],
+    cta: { label: "Join the waitlist", waitlist: true },
+    emphasis: false,
   },
 ];
 
@@ -185,7 +203,7 @@ const PricingPage = () => {
       titleIcon={["Simple", "pricing."]}
       intro={`Bring your own keys and use Lennette for free. Prefer everything included? Managed is coming soon at ${MANAGED_MONTHLY_PRICE} a month.`}
     >
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {plans.map((plan) => (
           <PlanCard
             key={plan.name}

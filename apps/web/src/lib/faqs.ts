@@ -29,7 +29,7 @@ export const HOME_FAQS: readonly FaqEntry[] = [
   {
     question: "Where are my conversations and transcripts stored?",
     answer:
-      "Chat and meeting history is stored locally on your device. You can revisit it in the dashboard. Relevant context is sent to your AI provider when you request an answer.",
+      "Local mode keeps history on your device. Managed accounts sync conversations, transcripts, prompts, preferences and attachments across devices, with a choice to import existing history. Relevant context goes to the AI provider when you request an answer. Lennette does not store raw meeting audio.",
   },
 ];
 
@@ -41,12 +41,12 @@ export const PRICING_FAQS: readonly FaqEntry[] = [
   },
   {
     question: "What will Managed include?",
-    answer: `The planned ${MANAGED_PLAN.price} monthly subscription includes 2,000 AI responses and 30 hours of live transcription. Each follow-up answer counts toward the same response allowance, shared across your devices. You will not need separate AI or transcription API keys.`,
+    answer: `The planned ${MANAGED_PLAN.price} monthly subscription includes 2,000 model-weighted AI credits and 1 GB of synced storage across three devices. Managed Plus at $40 includes 6,000 credits, a higher meeting allowance, premium models and 5 GB across six devices. Meeting allowances are being finalized before launch. AI credits vary with the model, context length and generated text; follow-ups use the same allowance. You will not need separate provider keys.`,
   },
   {
     question: "Does my audio stay on my device?",
     answer:
-      "Live transcription sends your audio to Deepgram. AI requests send relevant conversation context and any attached content to your selected provider. Your chat and meeting history is stored locally on your device.",
+      "Live transcription sends audio to your speech provider. AI requests send relevant context and selected attachments to your AI provider. In local mode, history stays on your device. Managed accounts sync text, settings and attachments to Lennette servers, with a choice to import existing history. Managed speech opts out of Deepgram model training, and Lennette does not store raw meeting audio.",
   },
   {
     question: "Can I sign up for Managed now?",

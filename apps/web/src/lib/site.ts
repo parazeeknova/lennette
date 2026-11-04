@@ -12,3 +12,7 @@ export const SOCIAL_IMAGE = {
 } as const;
 
 export const MANAGED_PLAN = { name: "Managed", price: "$17.10" } as const;
+export const MANAGED_PLUS_PLAN = {
+  name: "Managed Plus",
+  price: "$40",
+} as const;

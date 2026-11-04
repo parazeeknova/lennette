@@ -1,5 +1,5 @@
 //! Rounded dual contours rasterized independently of GPUI's quad border shader.
-//! Eight small cached patches keep memory independent of window dimensions.
+//! Four small cached corner patches keep memory independent of window dimensions.
 use crate::ui::theme::Theme;
 use gpui::{Bounds, Corners, IntoElement, RenderImage, Rgba, Styled, canvas, point, px, size};
 use std::{cell::RefCell, collections::VecDeque, sync::Arc};
@@ -13,7 +13,7 @@ struct Key {
 }
 struct Texture {
     key: Key,
-    patches: [Arc<RenderImage>; 8],
+    patches: [Arc<RenderImage>; 4],
 }
 thread_local! { static CACHE: RefCell<VecDeque<Texture>> = const { RefCell::new(VecDeque::new()) }; }
 const SAMPLES: u32 = 8;
@@ -86,6 +86,22 @@ fn raster(cap: u32, radius: f32, outer: Rgba, inner: Rgba) -> image::RgbaImage {
     image
 }
 
+/// Two one-device-pixel contours, identical on all four straight sides.
+fn straight_edges(w: f32, h: f32, c: f32, theme: Theme) -> [(f32, f32, f32, f32, Rgba); 8] {
+    let outer = theme.frame_outer_border;
+    let inner = theme.frame_border;
+    [
+        (c, 0.0, w - 2.0 * c, 1.0, outer),
+        (c, 1.0, w - 2.0 * c, 1.0, inner),
+        (c, h - 1.0, w - 2.0 * c, 1.0, outer),
+        (c, h - 2.0, w - 2.0 * c, 1.0, inner),
+        (0.0, c, 1.0, h - 2.0 * c, outer),
+        (1.0, c, 1.0, h - 2.0 * c, inner),
+        (w - 1.0, c, 1.0, h - 2.0 * c, outer),
+        (w - 2.0, c, 1.0, h - 2.0 * c, inner),
+    ]
+}
+
 pub fn dual_edge(theme: Theme, radius: f32) -> impl IntoElement {
     canvas(
         |_, _, _| (),
@@ -123,12 +139,8 @@ pub fn dual_edge(theme: Theme, radius: f32) -> impl IntoElement {
                 let c = cap;
                 let regions = [
                     (0, 0, c, c),
-                    (c, 0, 1, c),
                     (c + 1, 0, c, c),
-                    (0, c, c, 1),
-                    (c + 1, c, c, 1),
                     (0, c + 1, c, c),
-                    (c, c + 1, 1, c),
                     (c + 1, c + 1, c, c),
                 ];
                 let patches = regions.map(|(x, y, w, h)| {
@@ -154,14 +166,27 @@ pub fn dual_edge(theme: Theme, radius: f32) -> impl IntoElement {
             let h = height as f32;
             let destinations = [
                 (0.0, 0.0, c, c),
-                (c, 0.0, w - 2.0 * c, c),
                 (w - c, 0.0, c, c),
-                (0.0, c, c, h - 2.0 * c),
-                (w - c, c, c, h - 2.0 * c),
                 (0.0, h - c, c, c),
-                (c, h - c, w - 2.0 * c, c),
                 (w - c, h - c, c, c),
             ];
+            // Stretching one-texel strips through the linearly filtered sprite
+            // atlas samples neighboring texels. Paint straight edges directly;
+            // only the supersampled corners need textures.
+            for (x, y, w, h, color) in straight_edges(w, h, c, theme) {
+                if w > 0.0 && h > 0.0 {
+                    window.paint_quad(gpui::fill(
+                        Bounds::new(
+                            point(
+                                px(((f32::from(bounds.origin.x) * scale).floor() + x) / scale),
+                                px(((f32::from(bounds.origin.y) * scale).floor() + y) / scale),
+                            ),
+                            size(px(w / scale), px(h / scale)),
+                        ),
+                        color,
+                    ));
+                }
+            }
             for (image, (x, y, w, h)) in patches.into_iter().zip(destinations) {
                 if w <= 0.0 || h <= 0.0 {
                     continue;
@@ -211,6 +236,38 @@ mod tests {
             assert!(image.pixels().any(|p| p.0[3] > 0 && p.0[3] < 20));
         }
     }
+    #[test]
+    fn straight_sides_match_each_other_and_the_corner_join_in_every_theme() {
+        for theme in [Theme::LIGHT, Theme::DARK, Theme::GLASS] {
+            for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
+                let radius: f32 = 22.0 * scale;
+                let cap = radius.ceil() as u32 + 2;
+                let image = raster(cap, radius, theme.frame_outer_border, theme.frame_border);
+                let edges = straight_edges(400.0, 240.0, cap as f32, theme);
+                for pair in edges.as_chunks::<2>().0 {
+                    assert_eq!(bits(pair[0].4), bits(theme.frame_outer_border));
+                    assert_eq!(bits(pair[1].4), bits(theme.frame_border));
+                    for (depth, edge) in pair.iter().enumerate() {
+                        assert!(edge.2 == 1.0 || edge.3 == 1.0);
+                        let color = edge.4;
+                        let expected =
+                            [color.b, color.g, color.r, color.a].map(|v| (v * 255.0).round() as u8);
+                        // The last corner column/row joins the solid sides
+                        // with exactly the same quantized color and opacity.
+                        assert_eq!(image.get_pixel(cap, depth as u32).0, expected);
+                        assert_eq!(image.get_pixel(depth as u32, cap).0, expected);
+                    }
+                }
+                let n = image.width();
+                for y in 0..n {
+                    for x in 0..n {
+                        assert_eq!(image.get_pixel(x, y), image.get_pixel(y, x));
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn border_preference_and_two_contours_are_preserved() {
         let clear = Theme::with_alpha(Theme::DARK.border, 0.0);

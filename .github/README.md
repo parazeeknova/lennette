@@ -6,7 +6,7 @@
 ### Local workspace
 
 Run `bun install --frozen-lockfile`, start Docker Desktop, then run `bun dev`
-from the repository root. This starts the local PostgreSQL/Redis containers,
+from the repository root. This starts the local PostgreSQL, Redis, ClamAV and OpenObserve containers,
 applies migrations, and runs the API and landing together. `bun run dev:web`,
 `bun run dev:api`, and `bun run dev:desktop` run individual apps.
 
@@ -17,7 +17,31 @@ overriding app defaults. That local file is optional and ignored; copy
 The loader reads `.env.development` and the optional root `.env.local` explicitly.
 Only `VITE_`-prefixed variables should contain values intended for the browser.
 
-Local Compose contains only PostgreSQL and Redis. Configure the production API,
+`bun run infra:up` starts those four containers and waits for readiness;
+`bun run infra:down` stops them while preserving named data volumes. ClamAV uses
+`infra/clamd.conf` and a loopback-only `127.0.0.1:53310` port. The API's committed
+`.env.development` configures that address. `bun run test:integration` includes a
+real clean/EICAR scan test, in memory, plus direct OpenObserve ingestion checks.
+
+OpenObserve Enterprise v1.1.2 runs at `http://localhost:5080`, with a persisted
+data volume and seven-day retention. Its local-only bootstrap login defaults are
+`dev@lennette.local` / `LocalOnly-Observe123!` in Compose. Override
+`OPENOBSERVE_USER_EMAIL` and `OPENOBSERVE_USER_PASSWORD` in root `.env.local`
+before first startup if needed. Those variables initialize the first account;
+changing them later does not reset an existing OpenObserve password. Never use
+the development credentials in production.
+
+The API exports OTLP logs, metrics and traces directly to OpenObserve using
+authenticated HTTP/protobuf, batching, bounded queues and transient-error retries.
+HTTP totals/latency, PostgreSQL connections/size, Redis clients/memory, and attachment
+cleanup backlog/age are included. Provider requests have child spans for tracing.
+Local ports bind only to loopback. No Collector container or Docker socket mount
+is required. Telemetry is best effort: batches can be lost after retries are exhausted
+or the process crashes. Use a separate production ingestion identity with limited
+permissions, TLS and appropriate retention/access controls. SSO and AI/SRE setup
+are deferred; the Enterprise image does not provision those integrations automatically.
+
+Configure the production API,
 secrets, R2 attachment storage, migrations, and ingress in Dokploy;
 `infra/Dockerfile` remains available to build the API image there.
 

@@ -25,6 +25,41 @@ services:
       retries: 20
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-local-development-only}
+  clamav:
+    image: clamav/clamav:stable@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+    ports: ["127.0.0.1:53310:3310"]
+    volumes:
+      - ./clamd.conf:/etc/clamav/clamd.conf:ro
+      - clamav-data:/var/lib/clamav
+    environment:
+      CLAMD_STARTUP_TIMEOUT: 300
+    healthcheck:
+      test: ["CMD-SHELL", "printf 'zPING\\0' | nc -w 2 127.0.0.1 3310 | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      start_period: 120s
+      retries: 30
+    mem_limit: 4g
+    cpus: 2
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+  openobserve:
+    image: o2cr.ai/openobserve/openobserve-enterprise:latest@sha256:b291aff44100931e68dd0469125b72c57e020d75099696e8b663549140bafc46
+    ports: ["127.0.0.1:5080:5080"]
+    environment:
+      ZO_DATA_DIR: /data
+      ZO_ROOT_USER_EMAIL: ${OPENOBSERVE_USER_EMAIL:-dev@lennette.local}
+      ZO_ROOT_USER_PASSWORD: ${OPENOBSERVE_USER_PASSWORD:-LocalOnly-Observe123!}
+      ZO_TELEMETRY: "false"
+      ZO_COMPACT_DATA_RETENTION_DAYS: "7"
+    volumes: ["openobserve-data:/data"]
+    restart: unless-stopped
+    mem_limit: 3g
+    cpus: 2
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   postgres-data:
   redis-data:
+  clamav-data:
+  openobserve-data:

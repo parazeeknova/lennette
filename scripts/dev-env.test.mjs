@@ -36,3 +36,40 @@ test("app defaults work without a local file; root overrides stay scoped", () =>
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("local OpenObserve overrides derive ingestion auth without replacing explicit headers", () => {
+  const directory = mkdtempSync(join(tmpdir(), "lennette-observe-env-"));
+  try {
+    mkdirSync(join(directory, "api"));
+    writeFileSync(
+      join(directory, "api", ".env.development"),
+      "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:5080/api/default\nOTEL_EXPORTER_OTLP_HEADERS=default\n"
+    );
+    writeFileSync(
+      join(directory, ".env.local"),
+      "OPENOBSERVE_USER_EMAIL=test@example.test\nOPENOBSERVE_USER_PASSWORD=local-test-only\n"
+    );
+    const root = pathToFileURL(`${directory}/`);
+    const result = developmentEnv(new URL("api/", root), root, {});
+    expectHeader(result.OTEL_EXPORTER_OTLP_HEADERS);
+    writeFileSync(
+      join(directory, ".env.local"),
+      "OPENOBSERVE_USER_EMAIL=test@example.test\nOTEL_EXPORTER_OTLP_HEADERS=explicit\n"
+    );
+    assert.equal(
+      developmentEnv(new URL("api/", root), root, {})
+        .OTEL_EXPORTER_OTLP_HEADERS,
+      "explicit"
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function expectHeader(value) {
+  const encoded = value.split("Basic%20")[1].split(",")[0];
+  assert.equal(
+    Buffer.from(encoded, "base64").toString(),
+    "test@example.test:local-test-only"
+  );
+}

@@ -17,12 +17,25 @@ export function developmentEnv(
   rootDirectory,
   inherited = process.env
 ) {
-  return {
+  const local = readEnv(new URL(".env.local", rootDirectory), true);
+  const env = {
     ...readEnv(new URL(".env.development", appDirectory)),
     ...inherited,
-    ...readEnv(new URL(".env.local", rootDirectory), true),
+    ...local,
     NODE_ENV: "development",
   };
+  if (
+    !local.OTEL_EXPORTER_OTLP_HEADERS &&
+    (local.OPENOBSERVE_USER_EMAIL ||
+      local.OPENOBSERVE_USER_PASSWORD ||
+      inherited.OPENOBSERVE_USER_EMAIL ||
+      inherited.OPENOBSERVE_USER_PASSWORD) &&
+    env.OTEL_EXPORTER_OTLP_ENDPOINT === "http://127.0.0.1:5080/api/default"
+  ) {
+    const credentials = `${env.OPENOBSERVE_USER_EMAIL ?? "dev@lennette.local"}:${env.OPENOBSERVE_USER_PASSWORD ?? "LocalOnly-Observe123!"}`;
+    env.OTEL_EXPORTER_OTLP_HEADERS = `Authorization=Basic%20${Buffer.from(credentials).toString("base64")},stream-name=lennette_api`;
+  }
+  return env;
 }
 
 if (

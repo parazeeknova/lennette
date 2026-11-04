@@ -20,14 +20,5 @@ function run(command, args, cwd = root) {
   }
 }
 
-run("docker", [
-  "compose",
-  "-f",
-  "infra/compose.yaml",
-  "up",
-  "-d",
-  "--wait",
-  "postgres",
-  "redis",
-]);
+run(process.execPath, ["run", "infra:up"]);
 run(process.execPath, ["run", "migrate"], api);

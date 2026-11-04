@@ -16,9 +16,9 @@
     "format": "cargo fmt --all && bun run --cwd apps/web format",
     "test": "lerna run test --concurrency 1",
     "test:dev-env": "bun --no-env-file test scripts/dev-env.test.mjs",
-    "test:integration": "cargo test -p lennette-server --test integration -- --ignored",
-    "infra:up": "docker compose -f infra/compose.yaml up -d postgres redis",
-    "infra:down": "docker compose -f infra/compose.yaml down",
+    "test:integration": "bun --no-env-file scripts/dev-env.mjs api cargo test -p lennette-server --tests -- --ignored",
+    "infra:up": "bun scripts/infra.mjs up",
+    "infra:down": "bun scripts/infra.mjs down",
     "db:migrate": "bun run --cwd apps/api migrate"
   },
   "devDependencies": {

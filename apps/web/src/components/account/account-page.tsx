@@ -11,6 +11,7 @@ import {
 
 import { AccountWelcome } from "./account-welcome";
 import { SignInMethods } from "./sign-in-methods";
+import { UpgradePlan } from "./upgrade-plan";
 
 interface User {
   id: string;
@@ -40,6 +41,8 @@ interface Snapshot {
   usage: Usage;
   devices: Device[];
 }
+const canUpgrade = (sub: Usage["subscription"]) =>
+  sub?.plan === "managed" && sub.status === "active";
 const button =
   "glass glass-pill px-5 py-3 text-sm font-semibold disabled:opacity-50";
 const card = "glass rounded-3xl p-6 sm:p-8";
@@ -90,7 +93,7 @@ const Meter = ({
       </span>
     </div>
     <progress
-      className="h-2 w-full accent-sky-deep"
+      className="usage-meter h-3 w-full"
       max={Math.max(limit, 1)}
       value={Math.min(used, limit)}
       aria-label={label}
@@ -167,9 +170,11 @@ export const AccountPage = () => {
     const events = new EventSource(`${API_URL}/v1/account/events`, {
       withCredentials: true,
     });
-    events.addEventListener("changed", () => {
+    events.addEventListener("changed", (event) => {
       setConnected(true);
-      void refresh();
+      if ((event as MessageEvent | undefined)?.data !== "connected") {
+        void refresh();
+      }
     });
     events.addEventListener("expired", () => {
       events.close();
@@ -347,6 +352,11 @@ export const AccountPage = () => {
               Checkout and payment details are handled securely by Dodo
               Payments.
             </p>
+            <UpgradePlan
+              eligible={canUpgrade(snapshot.usage.subscription)}
+              disabled={busy}
+              onUpdated={refresh}
+            />
           </section>
           <section className={`${card} space-y-5`}>
             <h2 className="text-xl font-semibold">Current usage</h2>

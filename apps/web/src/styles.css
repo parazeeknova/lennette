@@ -355,6 +355,28 @@ details > summary::-webkit-details-marker {
 }
 
 /* Miniature product scenes for the managed-account introduction. */
+.usage-meter {
+  appearance: none;
+  overflow: hidden;
+  border: 1px solid oklch(1 0 0 / 0.7);
+  border-radius: 999px;
+  background: oklch(0.85 0.035 240 / 0.4);
+  box-shadow: inset 0 1px 3px oklch(0.4 0.06 245 / 0.15);
+}
+.usage-meter::-webkit-progress-bar {
+  border-radius: 999px;
+  background: transparent;
+}
+.usage-meter::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(180deg, oklch(0.78 0.1 235), var(--sky-deep));
+  box-shadow: inset 0 1px 1px oklch(1 0 0 / 0.65);
+}
+.usage-meter::-moz-progress-bar {
+  border-radius: 999px;
+  background: linear-gradient(180deg, oklch(0.78 0.1 235), var(--sky-deep));
+  box-shadow: inset 0 1px 1px oklch(1 0 0 / 0.65);
+}
 .account-welcome {
   background-color: oklch(0.96 0.025 235 / 0.45);
 }

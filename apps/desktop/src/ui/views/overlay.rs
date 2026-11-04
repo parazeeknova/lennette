@@ -4403,16 +4403,17 @@ impl Overlay {
         crate::managed::active().is_some() || (!self.chat_choices.is_empty() && self.speech_ready)
     }
 
-    /// Notice displayed directly above the input space when no API keys are configured.
+    /// Full-width connection notice below the composer in local setup mode.
     fn api_key_banner(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         if self.has_provider_access() {
             return None;
         }
         let material = self.theme.promotion();
         Some(
-            div().px(px(12.0)).pb(px(8.0)).child(
+            div().w_full().pb(px(12.0)).child(
                 div()
                     .relative()
+                    .w_full()
                     .flex()
                     .items_center()
                     .gap(px(10.0))
@@ -4425,11 +4426,6 @@ impl Overlay {
                         material,
                         radius::MD,
                     ))
-                    .child(icons::icon_colored(
-                        material.foreground,
-                        Icon::Sparkles,
-                        14.0,
-                    ))
                     .child(
                         div()
                             .flex_1()
@@ -4441,6 +4437,16 @@ impl Overlay {
                     .child(
                         div()
                             .id("connect-lennette-banner")
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .h(px(28.0))
+                            .px(px(10.0))
+                            .rounded_full()
+                            .bg(material.foreground)
+                            .text_color(material.background)
+                            .hover(|style| style.opacity(0.9))
                             .cursor_pointer()
                             .text_size(scaled(10.5))
                             .font_weight(FontWeight::SEMIBOLD)
@@ -4455,6 +4461,16 @@ impl Overlay {
                     .child(
                         div()
                             .id("configure-keys-banner")
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .h(px(28.0))
+                            .px(px(10.0))
+                            .rounded_full()
+                            .bg(material.foreground)
+                            .text_color(material.background)
+                            .hover(|style| style.opacity(0.9))
                             .cursor_pointer()
                             .text_size(scaled(10.5))
                             .font_weight(FontWeight::SEMIBOLD)
@@ -5745,8 +5761,8 @@ impl Render for Overlay {
                 .w_full()
                 .flex_shrink_0()
                 .when(self.transparent_menu_open(), |style| style.invisible())
-                .children(self.api_key_banner(cx))
                 .child(self.input_block(cx))
+                .children(self.api_key_banner(cx))
                 .child(height_probe(self.composer_height.clone(), cx));
             root = root.child(
                 div()

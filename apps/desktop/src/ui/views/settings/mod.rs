@@ -21,6 +21,7 @@ use crate::ui::theme::scaled;
 use crate::ui::theme::{Theme, radius, space};
 mod account;
 pub(crate) mod custom;
+mod promotion;
 mod search;
 
 /// Shortcut catalog shown on the shortcuts page, derived from the real bindings
@@ -1587,35 +1588,17 @@ pub fn render(
                 .w_full()
                 .items_start()
                 .gap(px(18.0))
-                .child(page_header(
-                    theme,
-                    active_route.title(),
-                    active_route.description(),
-                ))
                 .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .w_full()
-                        .child(
-                            div()
-                                .w(px(420.0))
-                                .max_w_full()
-                                .flex_shrink_0()
-                                .children(view.settings_search_field()),
-                        )
-                        .children((!query.is_empty()).then(|| {
-                            action(
-                                "clear-settings-search",
-                                theme,
-                                "Clear",
-                                cx,
-                                |view: &mut crate::ui::dashboard::view::DashboardView, cx, _| {
-                                    view.clear_settings_search(cx)
-                                },
-                            )
-                        })),
+                    div().flex().w_full().gap(px(20.0))
+                        .child(div().flex_1().min_w(px(0.0)).flex().flex_col().gap(px(16.0))
+                            .child(page_header(theme, active_route.title(), active_route.description()))
+                            .child(div().flex().items_center().gap(px(8.0)).w_full()
+                                .child(div().flex_1().min_w(px(0.0)).children(view.settings_search_field()))
+                                .children((!query.is_empty()).then(|| action(
+                                    "clear-settings-search", theme, "Clear", cx,
+                                    |view: &mut crate::ui::dashboard::view::DashboardView, cx, _| view.clear_settings_search(cx),
+                                )))))
+                        .child(promotion::banner(view, theme, cx)),
                 )
                 .child(tab_bar),
         )

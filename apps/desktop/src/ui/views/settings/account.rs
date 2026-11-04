@@ -205,7 +205,7 @@ fn meter(theme: &Theme, label: &str, used: f64, limit: f64, unit: &str) -> impl 
                 ),
         )
 }
-fn open_website(cx: &mut Context<View>, path: &str) {
+pub(super) fn open_website(cx: &mut Context<View>, path: &str) {
     let website = std::env::var("LENNETTE_WEBSITE_URL")
         .unwrap_or_else(|_| "https://lennette.itssingularity.com".into());
     cx.open_url(&format!("{}/{path}", website.trim_end_matches('/')));

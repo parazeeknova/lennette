@@ -5,6 +5,19 @@ import { searchResponse } from "@/lib/search-response";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("turns transport failures into a readable account error", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+  );
+  await expect(accountRequest("/browser/auth/google", "POST")).rejects.toEqual(
+    new AccountError(
+      "We couldn’t connect to account services. Please try again.",
+      0
+    )
+  );
+});
+
 it("accepts durable deletion and sends explicit confirmation with cookies", async () => {
   const fetcher = vi
     .fn()

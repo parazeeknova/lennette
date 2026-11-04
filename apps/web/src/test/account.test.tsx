@@ -1,3 +1,4 @@
+import type * as Router from "@tanstack/react-router";
 import {
   cleanup,
   fireEvent,
@@ -13,6 +14,22 @@ import { AccountError } from "@/lib/account-api";
 import { AccountPage } from "@/routes/account";
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
+vi.mock("@tanstack/react-router", async (original) => ({
+  ...(await original<typeof Router>()),
+  Link: ({
+    to,
+    children,
+    className,
+  }: {
+    to: string;
+    children: ReactNode;
+    className?: string;
+  }) => (
+    <a href={to} className={className}>
+      {children}
+    </a>
+  ),
+}));
 vi.mock("@/lib/account-api", async (original) => ({
   ...(await original<typeof AccountApi>()),
   accountRequest: request,
@@ -91,6 +108,34 @@ it("shows sign-in choices when the session is missing", async () => {
   expect(
     screen.getByRole("button", { name: "Continue with GitHub" })
   ).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(request.mock.calls.map(([path]) => path)).toEqual(["/me"]);
+  expect(
+    screen.getByRole("heading", { name: "AI, without the setup" })
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "Pick up on another device" })
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "Keep the context close" })
+  ).toBeInTheDocument();
+});
+
+it("offers recovery from an unavailable API without showing raw fetch errors", async () => {
+  request.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  render(<AccountPage />);
+  expect(
+    await screen.findByText(/Account services are temporarily unavailable/u)
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Failed to fetch")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Continue with Google" })
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Meeting User")).toBeInTheDocument();
+  expect(
+    screen.queryByText(/Account services are temporarily unavailable/u)
+  ).not.toBeInTheDocument();
 });
 
 it("renders usage, payment management and devices, and refreshes on server events", async () => {

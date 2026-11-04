@@ -30,6 +30,11 @@ export const accountRequest = async <T>(
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(60_000),
+  }).catch(() => {
+    throw new AccountError(
+      "We couldn’t connect to account services. Please try again.",
+      0
+    );
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as {

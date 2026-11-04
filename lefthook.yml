@@ -33,7 +33,7 @@ pre-commit:
       run: nixfmt --check {staged_files}
 
     web:
-      root: "web/"
+      root: "apps/web/"
       glob: "*.{ts,tsx,json,css}"
       run: |
         bun run lint

@@ -247,7 +247,8 @@ impl PortalShortcuts {
 const APP_ID: &str = crate::identity::APP_ID;
 
 /// The desktop entry the portal needs to resolve the app id.
-const DESKTOP_FILE: &str = include_str!("../../../packaging/com.itssingularity.lennette.desktop");
+const DESKTOP_FILE: &str =
+    include_str!("../../../../../packaging/com.itssingularity.lennette.desktop");
 
 /// Install the desktop entry into the user's applications directory.
 ///

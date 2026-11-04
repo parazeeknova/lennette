@@ -120,7 +120,7 @@ jobs:
           cp .github/README.md dist/lennette-linux-x86_64/README.md
           cp packaging/com.itssingularity.lennette.desktop dist/lennette-linux-x86_64/
           if [ -f LICENSE ]; then cp LICENSE dist/lennette-linux-x86_64/; fi
-          cp src/assets/lennette_app_icon.png dist/lennette-linux-x86_64/
+          cp apps/desktop/src/assets/lennette_app_icon.png dist/lennette-linux-x86_64/
           { rustc --version; ldd --version | sed -n '1p'; printf 'Commit: %s\n' "$GITHUB_SHA"; } > dist/lennette-linux-x86_64/BUILDINFO.txt
           dist/lennette-linux-x86_64/lennette --version
           tar -C dist -czf dist/lennette-linux-x86_64.tar.gz lennette-linux-x86_64

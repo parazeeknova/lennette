@@ -17,15 +17,15 @@ if [ "${1:-}" = --version ]; then echo 'lennette test'; exit 0; fi
 printf '%s\n' "$@" >"$LENNETTE_TEST_LAUNCH_LOG"
 FAKE
     chmod +x "$work/pkg/lennette-linux-x86_64/lennette"
-    cp "$source_dir/src/assets/lennette_app_icon.png" "$work/pkg/lennette-linux-x86_64/lennette_app_icon.png"
+    cp "$source_dir/apps/desktop/src/assets/lennette_app_icon.png" "$work/pkg/lennette-linux-x86_64/lennette_app_icon.png"
     tar -C "$work/pkg" -czf "$work/releases/download/$version/lennette-linux-x86_64.tar.gz" lennette-linux-x86_64
     (cd "$work/releases/download/$version" && sha256sum lennette-linux-x86_64.tar.gz >SHA256SUMS-linux-x86_64.txt)
 }
 install_here() {
     env -u XDG_DATA_HOME -u XDG_BIN_HOME -u LENNETTE_HOME \
         HOME="$test_home" SHELL=/bin/bash DISPLAY=:test \
-        LENNETTE_RELEASES_URL="$work/releases" LENNETTE_INSTALL_URL="$source_dir/web/public/install" \
-        bash "$source_dir/web/public/install" "$@" </dev/null
+        LENNETTE_RELEASES_URL="$work/releases" LENNETTE_INSTALL_URL="$source_dir/apps/web/public/install" \
+        bash "$source_dir/apps/web/public/install" "$@" </dev/null
 }
 run_launcher() {
     DISPLAY=:test "$test_home/.local/bin/lenny" "$@"
@@ -51,7 +51,7 @@ make_release v0.0.0-test
 install_here --no-launch --no-modify-path >"$work/install.log"
 check 'lenny is executable' test -x "$test_home/.local/bin/lenny"
 check 'the branded desktop launcher is installed' grep -q 'Icon=com.itssingularity.lennette' "$test_home/.local/share/applications/com.itssingularity.lennette.desktop"
-check 'desktop icon matches the shipped artwork' cmp "$source_dir/src/assets/lennette_app_icon.png" "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
+check 'desktop icon matches the shipped artwork' cmp "$source_dir/apps/desktop/src/assets/lennette_app_icon.png" "$test_home/.local/share/icons/hicolor/512x512/apps/com.itssingularity.lennette.png"
 check 'lennette remains a compatibility alias' test -e "$test_home/.local/bin/lennette"
 check '--no-launch does not open the app' test ! -e "$LENNETTE_TEST_LAUNCH_LOG"
 check '--no-modify-path preserves startup files' test ! -e "$test_home/.bashrc"

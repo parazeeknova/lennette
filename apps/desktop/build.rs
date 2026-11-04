@@ -1,6 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
-    println!("cargo:rerun-if-changed=packaging/windows/lennette.rc");
+    println!("cargo:rerun-if-changed=../../packaging/windows/lennette.rc");
     let manifest: toml_edit::DocumentMut = std::fs::read_to_string("Cargo.toml")
         .expect("read app manifest")
         .parse()
@@ -51,7 +51,7 @@ fn main() {
             .join("src/assets/lennette.ico")
             .to_string_lossy()
             .replace('\\', "/");
-        let resources = std::fs::read_to_string("packaging/windows/lennette.rc")
+        let resources = std::fs::read_to_string("../../packaging/windows/lennette.rc")
             .expect("read Windows resources")
             .replace("@ICON_PATH@", &icon)
             .replace(

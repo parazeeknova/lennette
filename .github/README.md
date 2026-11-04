@@ -57,8 +57,8 @@ For setup without opening the app, use `bash -s -- --no-launch` on Linux or
 `& ([scriptblock]::Create((irm https://lennette.itssingularity.com/install.ps1))) -NoLaunch`
 on Windows.
 
-The two native setup scripts live directly in `web/public/install` and
-`web/public/install.ps1`, served as `/install` and `/install.ps1`. There are no
+The two native setup scripts live directly in `apps/web/public/install` and
+`apps/web/public/install.ps1`, served as `/install` and `/install.ps1`. There are no
 root copies or generated copies. Bash and PowerShell need different setup
 syntax; after setup, users only need `lenny`. Windows exposes one `lenny.cmd`
 command, avoiding a conflicting `lenny.ps1` that execution policy could block.

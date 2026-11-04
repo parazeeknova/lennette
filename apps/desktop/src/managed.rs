@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 const SESSION_KEY: &str = "managed_session_v1";
 mod attachments;
+mod worker;
 pub use attachments::cache_attachment;
 static CLIENT: RwLock<Option<Client>> = RwLock::new(None);
 static DATABASE: OnceLock<PathBuf> = OnceLock::new();
@@ -58,13 +59,36 @@ pub fn init(path: Option<&Path>) {
                     .enable_all()
                     .build()
                     .expect("sync runtime");
+                runtime.spawn(worker::listen());
                 let mut failures = 0u32;
+                let mut last_pull = std::time::Instant::now() - worker::RECOVERY_INTERVAL;
                 loop {
                     if let (Some(client), Some(path)) = (active(), DATABASE.get()) {
                         let _lock = SYNC_LOCK.lock().unwrap();
-                        let result = Database::open(path)
-                            .map_err(|e| e.to_string())
-                            .and_then(|db| runtime.block_on(sync_and_save(&client, &db)));
+                        let result =
+                            Database::open(path)
+                                .map_err(|e| e.to_string())
+                                .and_then(|db| {
+                                    let pending: bool = db
+                                        .connection()
+                                        .query_row(
+                                            "SELECT EXISTS(SELECT 1 FROM cloud_outbox)",
+                                            [],
+                                            |row| row.get(0),
+                                        )
+                                        .map_err(|e| e.to_string())?;
+                                    let remote = worker::take_remote_change();
+                                    if worker::should_sync(
+                                        pending,
+                                        remote,
+                                        failures,
+                                        last_pull.elapsed(),
+                                    ) {
+                                        runtime.block_on(sync_and_save(&client, &db))?;
+                                        last_pull = std::time::Instant::now();
+                                    }
+                                    Ok(())
+                                });
                         match result {
                             Ok(()) => failures = 0,
                             Err(error) => {
@@ -80,7 +104,9 @@ pub fn init(path: Option<&Path>) {
                     } else {
                         (1_000u64 << failures.min(5)).min(30_000)
                     };
-                    std::thread::sleep(Duration::from_millis(delay));
+                    // Drive the socket while waiting for local outbox changes.
+                    runtime
+                        .block_on(async { tokio::time::sleep(Duration::from_millis(delay)).await });
                 }
             })
             .expect("start sync worker");

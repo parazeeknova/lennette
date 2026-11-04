@@ -70,6 +70,10 @@ impl Client {
             session: Arc::new(Mutex::new(session)),
         })
     }
+    /// Whether two handles belong to the same login, even after token rotation.
+    pub fn same_session(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.session, &other.session)
+    }
     pub async fn saved(&self) -> SavedSession {
         self.session.lock().await.clone()
     }

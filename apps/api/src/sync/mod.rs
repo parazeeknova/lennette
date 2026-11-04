@@ -412,7 +412,7 @@ async fn stream_changes(
         ])
         .await?;
     let result=async{
-        let mut poll=tokio::time::interval(Duration::from_secs(1));let mut check=tokio::time::interval(Duration::from_secs(15));
+        let mut poll=tokio::time::interval(Duration::from_secs(30));let mut check=tokio::time::interval(Duration::from_secs(15));
         loop {
             let page=pull_changes(state,p.account_id,cursor,100).await?;
             if !page.changes.is_empty(){cursor=page.cursor;ws.send(Message::Text(serde_json::to_string(&page).map_err(anyhow::Error::from)?.into())).await.map_err(anyhow::Error::from)?;if page.has_more{continue}}

@@ -24,6 +24,9 @@ static MEETING: Mutex<Option<Uuid>> = Mutex::new(None);
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 static STARTED: OnceLock<()> = OnceLock::new();
 pub fn active() -> Option<Client> {
+    stored_client().filter(|client| !client.is_revoked())
+}
+fn stored_client() -> Option<Client> {
     CLIENT.read().ok()?.clone()
 }
 pub fn status() -> String {
@@ -64,7 +67,12 @@ pub fn init(path: Option<&Path>) {
                 let mut failures = 0u32;
                 let mut last_pull = std::time::Instant::now() - worker::RECOVERY_INTERVAL;
                 loop {
-                    if let (Some(client), Some(path)) = (active(), DATABASE.get()) {
+                    if let (Some(client), Some(path)) = (stored_client(), DATABASE.get()) {
+                        if client.is_revoked() {
+                            expire_session(&client);
+                            failures = 0;
+                            continue;
+                        }
                         let _lock = SYNC_LOCK.lock().unwrap();
                         let result =
                             Database::open(path)
@@ -94,7 +102,9 @@ pub fn init(path: Option<&Path>) {
                             Ok(()) => failures = 0,
                             Err(error) => {
                                 failures = failures.saturating_add(1);
-                                message(error);
+                                if !client.is_revoked() {
+                                    message(error);
+                                }
                             }
                         }
                     } else {
@@ -140,15 +150,20 @@ pub async fn complete_login(login: Login, import: bool) -> Result<(), String> {
         .get()
         .ok_or("local database is unavailable")?
         .clone();
+    let saved = serde_json::to_value(client.saved().await).map_err(|e| e.to_string())?;
     tokio::task::spawn_blocking(move || {
         let _lock = SYNC_LOCK.lock().unwrap();
+        let mut active = CLIENT.write().unwrap();
         let db = Database::open(path).map_err(|e| e.to_string())?;
-        sync::bind(db.connection(), account, import).map_err(|e| e.to_string())
+        sync::bind(db.connection(), account, import).map_err(|e| e.to_string())?;
+        Vault::open_default()
+            .and_then(|v| v.set(SESSION_KEY, saved))
+            .map_err(|e| e.to_string())?;
+        *active = Some(client);
+        Ok::<(), String>(())
     })
     .await
     .map_err(|e| e.to_string())??;
-    save_session(&client).await?;
-    *CLIENT.write().unwrap() = Some(client);
     message("Signed in. Syncing your account…");
     Ok(())
 }
@@ -172,8 +187,40 @@ pub async fn sign_out() -> Result<(), String> {
     }
     Ok(())
 }
+fn expire_session(client: &Client) {
+    let _lock = SYNC_LOCK.lock().unwrap();
+    let mut active = CLIENT.write().unwrap();
+    if !active
+        .as_ref()
+        .is_some_and(|current| client.same_session(current))
+    {
+        return;
+    }
+    *active = None;
+    if let Err(error) = Vault::open_default().and_then(|vault| vault.remove(&[SESSION_KEY])) {
+        tracing::warn!(%error, "Could not remove revoked session from the device vault");
+    }
+    if let Some(path) = DATABASE.get() {
+        match Database::open(path).and_then(|db| sync::set_meta(db.connection(), "enabled", "0")) {
+            Ok(()) => {}
+            Err(error) => tracing::warn!(%error, "Could not disable revoked account outbox"),
+        }
+    }
+    message("This device was signed out. Your local history is still available.");
+}
+
 pub async fn save_session(client: &Client) -> Result<(), String> {
     let saved = serde_json::to_value(client.saved().await).map_err(|e| e.to_string())?;
+    // An in-flight request from a revoked/older login must not restore its
+    // credentials after sign-out or overwrite a newly connected account.
+    let active = CLIENT.read().unwrap();
+    if client.is_revoked()
+        || !active
+            .as_ref()
+            .is_some_and(|current| client.same_session(current))
+    {
+        return Ok(());
+    }
     let vault = Vault::open_default().map_err(|e| e.to_string())?;
     if vault.get(SESSION_KEY).map_err(|e| e.to_string())?.as_ref() != Some(&saved) {
         vault.set(SESSION_KEY, saved).map_err(|e| e.to_string())?;

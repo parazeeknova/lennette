@@ -80,13 +80,16 @@ async fn listen_session(client: &Client) -> Result<(), ()> {
     )
     .await
     .map_err(|_| ())?
-    .map_err(|_| ())?;
+    .map_err(|error| {
+        if matches!(error, tokio_tungstenite::tungstenite::Error::Http(ref response) if response.status().as_u16() == 401) { client.mark_revoked(); }
+    })?;
     // Reconcile after connecting, covering changes during a network outage.
     REMOTE_CHANGE.store(true, Ordering::Release);
     receive_notifications(
         socket,
         || active().is_some_and(|current| client.same_session(&current)),
         || REMOTE_CHANGE.store(true, Ordering::Release),
+        || client.mark_revoked(),
     )
     .await
 }
@@ -95,6 +98,7 @@ async fn receive_notifications<S>(
     mut socket: tokio_tungstenite::WebSocketStream<S>,
     current: impl Fn() -> bool,
     changed: impl Fn(),
+    revoked: impl Fn(),
 ) -> Result<(), ()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -116,6 +120,10 @@ where
                 last_frame = tokio::time::Instant::now();
                 match message {
                 Some(Ok(Message::Text(text))) => {
+                    if serde_json::from_str::<serde_json::Value>(&text).ok().is_some_and(|v| v["type"] == "session_revoked") {
+                        revoked();
+                        return Ok(());
+                    }
                     // Live AI/transcription frames share this socket; only
                     // durable record changes should trigger a sync pull.
                     if let Ok(page) = serde_json::from_str::<lennette_sync_client::protocol::PullResponse>(&text)
@@ -159,6 +167,7 @@ mod tests {
                 || {
                     changes.fetch_add(1, Ordering::AcqRel);
                 },
+                || {},
             )
             .await
         });
@@ -201,6 +210,42 @@ mod tests {
             Ok(())
         );
         assert!(matches!(server.next().await, Some(Ok(Message::Close(_)))));
+    }
+
+    #[tokio::test]
+    async fn revoked_control_frame_ends_notifications_and_invalidates_session() {
+        use std::sync::Arc;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connect =
+            tokio_tungstenite::connect_async(format!("ws://{}", listener.local_addr().unwrap()));
+        let accept = async {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        };
+        let (client, mut server) = tokio::join!(connect, accept);
+        let revoked = Arc::new(AtomicBool::new(false));
+        let flag = revoked.clone();
+        let task = tokio::spawn(async move {
+            receive_notifications(
+                client.unwrap().0,
+                || true,
+                || panic!("Revocation must not pull data"),
+                || flag.store(true, Ordering::Release),
+            )
+            .await
+        });
+        server
+            .send(Message::Text(r#"{"type":"session_revoked"}"#.into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap(),
+            Ok(())
+        );
+        assert!(revoked.load(Ordering::Acquire));
     }
 
     #[test]

@@ -591,7 +591,7 @@ pub async fn logout(
     State(state): State<AppState>,
     Extension(p): Extension<Principal>,
 ) -> Result<Json<Value>> {
-    sessions::Entity::update_many()
+    let changed = sessions::Entity::update_many()
         .col_expr(
             sessions::Column::RevokedAt,
             sea_orm::sea_query::Expr::value(Utc::now()),
@@ -599,6 +599,14 @@ pub async fn logout(
         .filter(sessions::Column::Id.eq(p.session_id))
         .exec(&state.db)
         .await?;
+    if changed.rows_affected > 0
+        && let Err(error) = state
+            .redis
+            .publish::<(), _, _>(format!("session:{}", p.session_id), "revoked")
+            .await
+    {
+        tracing::warn!(%error, "Session revoked; realtime notification unavailable");
+    }
     Ok(Json(json!({"ok":true})))
 }
 pub async fn devices(
@@ -618,7 +626,7 @@ pub async fn revoke(
     Extension(p): Extension<Principal>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>> {
-    sessions::Entity::update_many()
+    let changed = sessions::Entity::update_many()
         .col_expr(
             sessions::Column::RevokedAt,
             sea_orm::sea_query::Expr::value(Utc::now()),
@@ -627,6 +635,14 @@ pub async fn revoke(
         .filter(sessions::Column::AccountId.eq(p.account_id))
         .exec(&state.db)
         .await?;
+    if changed.rows_affected > 0
+        && let Err(error) = state
+            .redis
+            .publish::<(), _, _>(format!("session:{}", id), "revoked")
+            .await
+    {
+        tracing::warn!(%error, "Session revoked; realtime notification unavailable");
+    }
     Ok(Json(json!({"ok":true})))
 }
 #[cfg(test)]

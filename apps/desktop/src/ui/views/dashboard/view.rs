@@ -382,6 +382,14 @@ impl DashboardView {
             let result = crate::managed::usage().await;
             this.update(cx, |view, cx| {
                 view.account_task = None;
+                if crate::managed::active().is_none() {
+                    view.account_usage = None;
+                    view.account_note = Some(
+                        "This device was signed out. Your local history is still available.".into(),
+                    );
+                    cx.notify();
+                    return;
+                }
                 match result {
                     Ok(value) => {
                         view.account_usage = Some(value);
@@ -2595,6 +2603,10 @@ fn truncate(text: &str, limit: usize) -> String {
 
 impl Render for DashboardView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if crate::managed::active().is_none() && self.account_usage.take().is_some() {
+            self.account_note =
+                Some("This device was signed out. Your local history is still available.".into());
+        }
         if self.bounds_observer.is_none() {
             self.bounds_observer = Some(cx.observe_window_bounds(window, |_, _, cx| cx.notify()));
         }

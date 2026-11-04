@@ -5,7 +5,13 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -20,6 +26,8 @@ pub enum Error {
     Network(#[from] reqwest::Error),
     #[error("managed service returned {0}: {1}")]
     Status(u16, String),
+    #[error("This device was signed out. Your local history is still available.")]
+    SessionRevoked,
     #[error("{0}")]
     Protocol(String),
     #[error("local callback failed: {0}")]
@@ -37,6 +45,7 @@ pub struct Client {
     pub http: reqwest::Client,
     base: Url,
     session: Arc<Mutex<SavedSession>>,
+    revoked: Arc<AtomicBool>,
 }
 pub fn now() -> u64 {
     std::time::SystemTime::now()
@@ -68,7 +77,20 @@ impl Client {
             base: base_url(&session.api_url)?,
             http: http()?,
             session: Arc::new(Mutex::new(session)),
+            revoked: Arc::new(AtomicBool::new(false)),
         })
+    }
+    pub fn is_revoked(&self) -> bool {
+        self.revoked.load(Ordering::Acquire)
+    }
+    pub fn mark_revoked(&self) {
+        self.revoked.store(true, Ordering::Release);
+    }
+    async fn checked(&self, response: reqwest::Response) -> Result<reqwest::Response> {
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.mark_revoked();
+        }
+        checked(response).await
     }
     /// Whether two handles belong to the same login, even after token rotation.
     pub fn same_session(&self, other: &Self) -> bool {
@@ -86,6 +108,9 @@ impl Client {
             .map_err(|_| Error::Protocol("invalid API path".into()))
     }
     pub async fn access_token(&self) -> Result<String> {
+        if self.is_revoked() {
+            return Err(Error::SessionRevoked);
+        }
         let mut session = self.session.lock().await;
         if session.expires_at <= now() + 60 {
             let response = self
@@ -94,7 +119,7 @@ impl Client {
                 .json(&serde_json::json!({"refresh_token":session.tokens.refresh_token}))
                 .send()
                 .await?;
-            let tokens: protocol::Tokens = checked(response).await?.json().await?;
+            let tokens: protocol::Tokens = self.checked(response).await?.json().await?;
             if tokens.account_id != session.tokens.account_id {
                 return Err(Error::Protocol("account changed during refresh".into()));
             }
@@ -110,7 +135,7 @@ impl Client {
         body: &T,
     ) -> Result<reqwest::Response> {
         let token = self.access_token().await?;
-        checked(
+        self.checked(
             self.http
                 .request(method, self.url(path)?)
                 .bearer_auth(token)
@@ -182,9 +207,10 @@ pub async fn checked(response: reqwest::Response) -> Result<reqwest::Response> {
         return Ok(response);
     }
     let status = response.status().as_u16();
-    let message = if status == 401 {
-        "Please sign in again."
-    } else if status == 402 {
+    if status == 401 {
+        return Err(Error::SessionRevoked);
+    }
+    let message = if status == 402 {
         "Subscription or usage limit reached. Existing data is still available."
     } else if status == 409 {
         "Changes conflict with another device. Review the sync conflict before continuing."
@@ -298,5 +324,53 @@ impl Login {
             api_url: self.base.to_string(),
             expires_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    #[tokio::test]
+    async fn unauthorized_revokes_all_clones_but_quota_and_network_errors_do_not() {
+        for (status, expired) in [
+            (401, false),
+            (401, true),
+            (402, false),
+            (429, false),
+            (503, false),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = [0u8; 8192];
+                let _ = socket.read(&mut bytes).await.unwrap();
+                socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}} ").trim_end().as_bytes()).await.unwrap();
+            });
+            let client = Client::restore(SavedSession {
+                api_url: base,
+                expires_at: if expired { 0 } else { now() + 3600 },
+                tokens: protocol::Tokens {
+                    access_token: "test-token".into(),
+                    refresh_token: "test-refresh".into(),
+                    expires_in: 3600,
+                    account_id: Uuid::new_v4(),
+                },
+            })
+            .unwrap();
+            let clone = client.clone();
+            assert!(
+                client
+                    .request(reqwest::Method::GET, "/v1/me", &())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(client.is_revoked(), status == 401);
+            assert_eq!(clone.is_revoked(), status == 401);
+            if status == 401 {
+                assert!(clone.access_token().await.is_err());
+            }
+            server.await.unwrap();
+        }
     }
 }

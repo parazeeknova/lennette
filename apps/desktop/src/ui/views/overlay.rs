@@ -1952,7 +1952,15 @@ impl Overlay {
                     .await;
                 let alive = this
                     .update(cx, |overlay, cx| {
+                        let was_managed = overlay.managed_session.is_some();
                         let changed = overlay.sync_settings();
+                        if was_managed && overlay.managed_session.is_none() {
+                            overlay.interrupt_response();
+                            overlay.cancel_dictation();
+                            overlay.stop_listening();
+                            overlay.chat_error = None;
+                            overlay.listen_error = None;
+                        }
                         if !overlay.quit_pending && crate::dev_lifecycle::should_stop() {
                             overlay.interrupt_response();
                             overlay.cancel_dictation();
@@ -1972,7 +1980,8 @@ impl Overlay {
                         overlay.poll_control(cx);
                         overlay.poll_tray(cx);
                         if changed {
-                            cx.notify();
+                            // Account and theme changes affect both windows.
+                            cx.refresh_windows();
                         }
                         true
                     })

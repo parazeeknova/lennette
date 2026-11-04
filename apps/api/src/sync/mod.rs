@@ -409,6 +409,7 @@ async fn stream_changes(
         .subscribe(vec![
             format!("sync:{}", p.account_id),
             format!("live:{}", p.account_id),
+            format!("session:{}", p.session_id),
         ])
         .await?;
     let result=async{
@@ -419,9 +420,18 @@ async fn stream_changes(
             tokio::select!{
                 _=state.shutdown.cancelled()=>break,
                 _=poll.tick()=>{},
-                notification=messages.recv()=>{if let Ok(message)=notification && message.channel.starts_with("live:") && let Ok(text)=message.value.convert::<String>(){ws.send(Message::Text(text.into())).await.map_err(anyhow::Error::from)?;}},
+                notification=messages.recv()=>{if let Ok(message)=notification {
+                    if message.channel.starts_with("session:") && matches!(auth::authenticate(state,token).await,Err(ApiError::Unauthorized)) {
+                        ws.send(Message::Text(r#"{"type":"session_revoked"}"#.into())).await.map_err(anyhow::Error::from)?;
+                        break;
+                    }
+                    if message.channel.starts_with("live:") && let Ok(text)=message.value.convert::<String>(){ws.send(Message::Text(text.into())).await.map_err(anyhow::Error::from)?;}
+                }},
                 _=check.tick()=>{
-                    auth::authenticate(state,token).await?;
+                    if let Err(error) = auth::authenticate(state,token).await {
+                        if matches!(error,ApiError::Unauthorized) { ws.send(Message::Text(r#"{"type":"session_revoked"}"#.into())).await.map_err(anyhow::Error::from)?; }
+                        return Err(error);
+                    }
                     let renewed:i64=state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],45) else return 0 end",vec![key],vec![lease]).await?;
                     if renewed==0{return Err(ApiError::Unauthorized)}
                     ws.send(Message::Ping(Bytes::new())).await.map_err(anyhow::Error::from)?;

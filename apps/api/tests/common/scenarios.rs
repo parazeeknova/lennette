@@ -499,6 +499,83 @@ async fn dodo_checkout_signed_webhooks_reconcile_current_state_and_deduplicate()
     cleanup(state, id).await;
 }
 
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn remote_device_revocation_notifies_sync_socket_immediately() {
+    use tokio_tungstenite::tungstenite::{Message as WireMessage, client::IntoClientRequest};
+    let (state, app, account, desktop) = fixture().await;
+    let browser = auth::issue(&state, account, Uuid::new_v4(), "Browser")
+        .await
+        .unwrap();
+    let principal = auth::authenticate(&state, &desktop.access_token)
+        .await
+        .unwrap();
+    let (api, task) = serve(app.clone()).await;
+    let mut request_ws = format!("{}/v1/sync/ws?after=0", api.replace("http://", "ws://"))
+        .into_client_request()
+        .unwrap();
+    request_ws.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", desktop.access_token).parse().unwrap(),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request_ws).await.unwrap();
+    // The first heartbeat proves the Redis subscription has been installed.
+    tokio::time::timeout(StdDuration::from_secs(5), async {
+        loop {
+            if let WireMessage::Ping(payload) = socket.next().await.unwrap().unwrap() {
+                socket.send(WireMessage::Pong(payload)).await.unwrap();
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(
+        request(
+            &app,
+            "DELETE",
+            &format!("/v1/devices/{}", principal.session_id),
+            Some(&browser.access_token),
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(next_json(&mut socket).await["type"], "session_revoked");
+    assert!(
+        started.elapsed() < StdDuration::from_secs(2),
+        "Revocation must not wait for the periodic authentication check"
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            "/v1/me",
+            Some(&desktop.access_token),
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            "/v1/me",
+            Some(&browser.access_token),
+            json!(null)
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    task.abort();
+    cleanup(state, account).await;
+}
+
 async fn next_json(
     socket: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,

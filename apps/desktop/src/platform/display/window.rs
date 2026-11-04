@@ -277,7 +277,7 @@ pub fn set_icon_hidden(window: &Window, hidden: bool) -> Applied {
             );
             // A style/frame refresh can clear DWM state. Restore both policies
             // before exposing the changed window to the desktop again.
-            configure_frame(window);
+            configure_win32_frame(handle);
             if let Err(error) = protect_win32(handle) {
                 tracing::error!(%error, "refusing to expose a window after its icon style changed");
                 return Applied::Failed;
@@ -455,6 +455,16 @@ pub fn set_visible(window: &Window, visible: bool) -> Applied {
 
 /// Bring the window to the front.
 pub fn focus(window: &Window) -> Applied {
+    #[cfg(windows)]
+    if let Some(handle) = win32_window(window) {
+        // SetFocus may return null on success (no previous focus window). Avoid
+        // GPUI's wrapper interpreting that as HRESULT(0) and logging an error.
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(handle);
+            windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(handle);
+        }
+        return Applied::Yes;
+    }
     #[cfg(target_os = "linux")]
     if let Some(id) = x11_window(window) {
         let _ = set_active_window_x11(id);

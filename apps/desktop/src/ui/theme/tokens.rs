@@ -276,7 +276,7 @@ impl Surfaces {
     /// The page behind everything. This is the only surface that goes fully
     /// clear at 0%, so the window can sit invisibly over the desktop.
     pub fn background(self) -> Rgba {
-        self.fade(self.theme.background)
+        Theme::with_alpha(self.theme.background, self.opacity)
     }
 
     /// Glass panels keep a faint tint; other themes retain a legibility floor.
@@ -390,7 +390,7 @@ mod tests {
             assert!(surfaces.border().a <= 0.1);
             assert!(theme.control_border(true).a <= 0.12);
             assert!(theme.focus_border().a > 0.0);
-            assert!(surfaces.background().a <= 0.18);
+            assert_eq!(surfaces.background().a, opacity);
             assert!(theme.popover().a > surfaces.card().a);
             assert_eq!(theme.primary_foreground(), theme.foreground);
             assert_eq!(theme.foreground.a, 1.0);
@@ -448,11 +448,14 @@ mod tests {
     }
 
     #[test]
-    fn full_opacity_keeps_the_declared_alpha() {
-        let theme = Theme::GLASS;
-        let full = theme.surfaces(1.0);
-        assert!((full.card().a - theme.card.a).abs() < 1e-6);
-        assert!((full.background().a - theme.background.a).abs() < 1e-6);
+    fn full_opacity_makes_the_window_opaque() {
+        for theme in [Theme::GLASS, Theme::DARK, Theme::LIGHT] {
+            let full = theme.surfaces(1.0);
+            assert!((full.card().a - theme.card.a).abs() < 1e-6);
+            assert_eq!(full.background().a, 1.0);
+            assert_eq!(theme.surfaces(0.5).background().a, 0.5);
+            assert_eq!(theme.surfaces(0.0).background().a, 0.0);
+        }
     }
 
     #[test]

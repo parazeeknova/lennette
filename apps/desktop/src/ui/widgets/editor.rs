@@ -205,8 +205,11 @@ impl Render for Editor {
             })
             .overflow_hidden()
             .p(crate::ui::theme::scaled(padding))
-            .rounded(px(if self.dense { 7.0 } else { 10.0 }))
-            .border_1()
+            .rounded(px(crate::ui::widgets::window_frame::aligned_radius(
+                if self.dense { 8.0 } else { 12.0 },
+                window.scale_factor(),
+            )))
+            .border(px(1.0 / window.scale_factor()))
             .border_color(if focused {
                 self.theme.focus_border()
             } else {

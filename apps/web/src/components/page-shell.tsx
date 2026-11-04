@@ -201,9 +201,6 @@ export const SiteFooter = () => (
         aria-label="Footer"
         className="flex flex-wrap items-center justify-center gap-3 sm:gap-4"
       >
-        <Link to="/tutorial" className={pillLinkClassName}>
-          <span>Hyprland setup</span>
-        </Link>
         <Link to="/downloads" className={pillLinkClassName}>
           <span>Downloads</span>
         </Link>
@@ -223,14 +220,6 @@ export const SiteFooter = () => (
           className={pillLinkClassName}
         >
           <span>Singularity Works</span>
-        </a>
-        <a
-          href="https://github.com/parazeeknova"
-          target="_blank"
-          rel="noreferrer"
-          className={pillLinkClassName}
-        >
-          <span>Creator</span>
         </a>
       </nav>
     </div>

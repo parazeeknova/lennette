@@ -248,6 +248,9 @@ pub fn model_icon(theme: &Theme, provider: &str, model: &str, size: f32) -> gpui
 
 /// Single source for the embedded SVG assets used by every native window.
 pub fn model_asset(path: &str) -> Option<&'static [u8]> {
+    if path == "model-icons/LICENSE" {
+        return Some(include_bytes!("../../assets/model-icons/LICENSE"));
+    }
     MODEL_FAMILIES
         .iter()
         .find(|(_, asset_path, _)| *asset_path == path)

@@ -65,7 +65,6 @@ const MeetingPreview = () => (
 
 const SyncPreview = () => (
   <div className="account-scene account-scene-sync" aria-hidden="true">
-    <div className="account-sync-orbit" />
     <div className="account-desktop">
       <div className="account-window-top">
         YOUR MEETING <span className="account-live-dot ml-auto" />
@@ -234,16 +233,6 @@ export const AccountWelcome = ({
       <p className="mt-4 text-center text-[11px] text-ink-soft">
         Illustrative previews. Usage, storage, and device limits depend on your
         plan.
-      </p>
-      <p className="mt-8 text-center text-sm text-ink-soft">
-        Prefer your own setup? Local mode stays free with your own keys.{" "}
-        <Link
-          to="/downloads"
-          className="text-sky-deep underline underline-offset-4"
-        >
-          Download Lennette
-        </Link>
-        .
       </p>
     </section>
   </>

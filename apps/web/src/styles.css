@@ -514,25 +514,6 @@ details > summary::-webkit-details-marker {
   font-size: 7px;
   animation-delay: 0.7s;
 }
-.account-sync-orbit {
-  position: absolute;
-  width: 210px;
-  height: 210px;
-  border: 1px dashed oklch(0.6 0.08 245 / 0.25);
-  border-radius: 50%;
-  animation: account-orbit 40s linear infinite;
-}
-.account-sync-orbit::after {
-  content: "";
-  position: absolute;
-  top: 28px;
-  left: 28px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--sky-deep);
-  box-shadow: 0 0 0 5px oklch(0.7 0.08 245 / 0.15);
-}
 .account-sync-badge {
   position: absolute;
   bottom: 25px;
@@ -617,11 +598,6 @@ details > summary::-webkit-details-marker {
   40%,
   75% {
     opacity: 1;
-  }
-}
-@keyframes account-orbit {
-  to {
-    transform: rotate(360deg);
   }
 }
 @media (prefers-reduced-motion: reduce) {

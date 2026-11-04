@@ -52,7 +52,9 @@ const AccountLayout = ({
   children: ReactNode;
 }) => (
   <PageShell
-    title={signedIn ? "Your account" : "Your meetings. All together."}
+    titleIcon={
+      signedIn ? ["Your", "account."] : ["Your meetings.", "All together."]
+    }
     intro={
       signedIn
         ? "Manage your subscription, usage and signed-in devices."

@@ -2,67 +2,137 @@ use super::*;
 type View = crate::ui::dashboard::view::DashboardView;
 
 pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui::AnyElement {
-    let signed_in = crate::managed::active().is_some();
-    let mut content = section(
-        theme,
-        "Account & sync",
-        "Use your own keys locally, or sign in for managed AI and sync across devices.",
-    )
-    .child(help_text(theme, &crate::managed::status()));
-    if signed_in {
-        content = content
-            .child(row(
+    let connected = crate::managed::active().is_some();
+    let mut card = div()
+        .w_full()
+        .p(px(24.0))
+        .rounded(px(radius::LG))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.card)
+        .flex()
+        .flex_col()
+        .gap(px(20.0));
+    card = card.child(
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icons::icon(theme, Icon::Cloud, 22.0))
+                    .child(
+                        div()
+                            .text_size(scaled(17.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Lennette account"),
+                    ),
+            )
+            .child(
+                div()
+                    .px(px(10.0))
+                    .py(px(5.0))
+                    .rounded_full()
+                    .bg(theme.muted)
+                    .text_size(scaled(10.0))
+                    .text_color(theme.muted_foreground)
+                    .child(if connected {
+                        "Connected"
+                    } else {
+                        "Local workspace"
+                    }),
+            ),
+    );
+    if connected {
+        card=card.child(copy(theme,"Your workspace, connected.","Manage your subscription, connected sign-in methods, and devices in your browser. Your history stays available on this device."))
+            .child(help_text(theme,&crate::managed::status()));
+        if let Some(usage) = view.account_usage() {
+            let plan = match usage["subscription"]["plan"].as_str() {
+                Some("managed_plus") => "Managed Plus",
+                Some("managed") => "Managed",
+                _ => "No paid subscription",
+            };
+            card = card.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .p(px(16.0))
+                    .rounded(px(radius::MD))
+                    .bg(theme.muted)
+                    .child(
+                        div()
+                            .text_size(scaled(13.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(plan),
+                    )
+                    .child(meter(
+                        theme,
+                        "AI credits",
+                        usage["ai_used_microdollars"].as_f64().unwrap_or(0.0) / 1000.0,
+                        usage["limits"]["ai_microdollars"].as_f64().unwrap_or(0.0) / 1000.0,
+                        "credits",
+                    ))
+                    .child(meter(
+                        theme,
+                        "Transcription",
+                        usage["transcription_seconds"].as_f64().unwrap_or(0.0) / 60.0,
+                        usage["limits"]["transcription_seconds"]
+                            .as_f64()
+                            .unwrap_or(0.0)
+                            / 60.0,
+                        "min",
+                    ))
+                    .child(meter(
+                        theme,
+                        "Synced storage",
+                        usage["storage_bytes"].as_f64().unwrap_or(0.0) / 1e9,
+                        usage["limits"]["storage_bytes"].as_f64().unwrap_or(0.0) / 1e9,
+                        "GB",
+                    )),
+            );
+        }
+        card=card.child(div().flex().flex_wrap().gap(px(8.0))
+            .child(action("account-dashboard",theme,"Manage account & plan",cx,|_:&mut View,cx,_|open_website(cx,"account")))
+            .child(action("account-refresh",theme,if view.account_busy(){"Updating…"}else{"Refresh usage"},cx,|view:&mut View,cx,_|view.refresh_account_usage(cx)))
+            .child(action("account-signout",theme,"Disconnect device",cx,|view:&mut View,cx,_|view.sign_out_account(cx))))
+            .child(help_text(theme,"Disconnecting stops sync on this device. It does not delete local history or cancel your subscription."));
+        let mut models = div().flex().flex_wrap().gap(px(8.0));
+        for (index, (id, label)) in [
+            ("openai/gpt-6-luna", "Luna"),
+            ("anthropic/claude-haiku-5-5", "Haiku"),
+            ("deepseek/deepseek-v4.1-flash", "DeepSeek Flash"),
+            ("google/gemini-3.5-flash-lite", "Gemini Lite"),
+            ("google/gemini-3.8-flash", "Gemini Flash"),
+            ("anthropic/claude-sonnet-5-5", "Sonnet · Plus"),
+            ("openai/gpt-6.1-sol", "Sol · Plus"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            models = models.child(action(
+                ("managed-model", index),
                 theme,
-                "Account usage",
-                "View your current subscription and remaining usage",
-                action(
-                    "account-usage",
-                    theme,
-                    "Refresh usage",
-                    cx,
-                    |view: &mut View, cx, _| view.refresh_account_usage(cx),
-                ),
-            ))
-            .child(row(
+                label,
+                cx,
+                move |view: &mut View, cx, _| {
+                    view.select_managed_model(id);
+                    cx.notify();
+                },
+            ));
+        }
+        card=card.child(div().border_t_1().border_color(theme.border).pt(px(16.0)).flex().flex_col().gap(px(10.0))
+            .child(copy(theme,"Managed AI","Choose the model for your next answer. Availability and usage depend on your plan."))
+            .child(models));
+        if crate::managed::status().to_lowercase().contains("conflict") {
+            card = card.child(row(
                 theme,
-                "Managed · $17.10/month",
-                "300 meeting minutes, model-weighted AI credits and 10 GB storage",
-                action(
-                    "account-standard",
-                    theme,
-                    "Subscribe",
-                    cx,
-                    |view: &mut View, cx, _| view.open_account_billing(Some("managed"), cx),
-                ),
-            ))
-            .child(row(
-                theme,
-                "Managed Plus · $40/month",
-                "1,200 meeting minutes, more AI credits, premium models and 50 GB storage",
-                action(
-                    "account-plus",
-                    theme,
-                    "Subscribe",
-                    cx,
-                    |view: &mut View, cx, _| view.open_account_billing(Some("managed_plus"), cx),
-                ),
-            ))
-            .child(row(
-                theme,
-                "Billing",
-                "Manage your subscription, invoices or cancellation",
-                action(
-                    "account-portal",
-                    theme,
-                    "Open billing",
-                    cx,
-                    |view: &mut View, cx, _| view.open_account_billing(None, cx),
-                ),
-            ))
-            .child(row(
-                theme,
-                "Sync conflicts",
-                "Keep the queued edits on this device, or accept the saved cloud versions",
+                "Resolve sync conflicts",
+                "Choose which version to keep",
                 div()
                     .flex()
                     .gap(px(8.0))
@@ -80,57 +150,90 @@ pub(super) fn panel(view: &View, theme: &Theme, cx: &mut Context<View>) -> gpui:
                         cx,
                         |view: &mut View, cx, _| view.resolve_account_conflicts(false, cx),
                     )),
-            ))
-            .child(row(
-                theme,
-                "Local only",
-                "Stop syncing and remove this device's saved sign-in",
-                action(
-                    "account-signout",
-                    theme,
-                    "Sign out",
-                    cx,
-                    |view: &mut View, cx, _| view.sign_out_account(cx),
-                ),
-            ));
-        let mut models = div().flex().flex_wrap().gap(px(8.0));
-        for (index, (id, label)) in [
-            ("openai/gpt-6-luna", "Luna · 1×"),
-            ("anthropic/claude-haiku-5-5", "Haiku · 1×"),
-            ("deepseek/deepseek-v4.1-flash", "DeepSeek Flash · 3×"),
-            ("google/gemini-3.5-flash-lite", "Gemini Lite · 5×"),
-            ("google/gemini-3.8-flash", "Gemini Flash · 8×"),
-            ("anthropic/claude-sonnet-5-5", "Sonnet · 20× · Plus"),
-            ("openai/gpt-6.1-sol", "Sol · 20× · Plus"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            models = models.child(action(
-                ("managed-model", index),
-                theme,
-                label,
-                cx,
-                move |view: &mut View, cx, _| {
-                    view.select_managed_model(id);
-                    cx.notify();
-                },
             ));
         }
-        content = content.child(row(
-            theme,
-            "Managed model",
-            "Usage varies with context length and generated text. Premium models require Plus.",
-            models,
-        ));
     } else {
-        content=content.child(row(theme,"Import existing history","Include this device's existing conversations, transcripts, prompts and profiles on first sign-in",switch("account-import",theme,view.account_import(),cx,|view:&mut View,cx,_|{view.toggle_account_import();cx.notify();})))
-            .child(row(theme,"Sign in","Your browser will open. Provider keys and device settings stay local.",div().flex().gap(px(8.0))
-                .child(action("account-google",theme,"Google",cx,|view:&mut View,cx,_|view.start_account_login("google",cx)))
-                .child(action("account-github",theme,"GitHub",cx,|view:&mut View,cx,_|view.start_account_login("github",cx)))));
+        card=card.child(copy(theme,"Your meetings. One workspace.","Connect your Lennette subscription for managed AI and live transcription, with conversations and attachments synced across devices."))
+            .child(div().flex().flex_wrap().gap(px(16.0))
+                .child(feature(theme,Icon::Sparkles,"AI without API keys"))
+                .child(feature(theme,Icon::RefreshCw,"Live sync"))
+                .child(feature(theme,Icon::FolderOpen,"History & attachments")))
+            .child(div().border_t_1().border_color(theme.border).pt(px(16.0)).child(row(theme,"Bring your history along","Optional: import existing conversations, transcripts, prompts, and profiles on first connection.",switch("account-import",theme,view.account_import(),cx,|view:&mut View,cx,_|{view.toggle_account_import();cx.notify();}))))
+            .child(div().flex().flex_wrap().gap(px(8.0))
+                .child(action("account-google",theme,if view.account_busy(){"Connecting…"}else{"Continue with Google"},cx,|view:&mut View,cx,_|view.start_account_login("google",cx)))
+                .child(action("account-github",theme,"Continue with GitHub",cx,|view:&mut View,cx,_|view.start_account_login("github",cx)))
+                .child(action("account-plans",theme,"View plans",cx,|_:&mut View,cx,_|open_website(cx,"pricing"))))
+            .child(help_text(theme,"Sign in securely in your browser. Creating an account is free; managed AI requires a paid plan. Provider keys and device settings stay local."));
     }
     if let Some(note) = view.account_note() {
-        content = content.child(help_text(theme, note));
+        card = card.child(warning(theme, note));
     }
-    content.into_any_element()
+    card.into_any_element()
+}
+fn copy(theme: &Theme, title: &str, description: &str) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .child(
+            div()
+                .text_size(scaled(15.0))
+                .font_weight(FontWeight::MEDIUM)
+                .child(title.to_owned()),
+        )
+        .child(
+            div()
+                .text_size(scaled(12.0))
+                .text_color(theme.muted_foreground)
+                .whitespace_normal()
+                .child(description.to_owned()),
+        )
+}
+fn feature(theme: &Theme, icon: Icon, label: &'static str) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .text_size(scaled(11.0))
+        .text_color(theme.muted_foreground)
+        .child(icons::icon(theme, icon, 14.0))
+        .child(label)
+}
+fn meter(theme: &Theme, label: &str, used: f64, limit: f64, unit: &str) -> impl IntoElement {
+    let fraction = if limit > 0.0 {
+        (used / limit).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .child(
+            div()
+                .flex()
+                .justify_between()
+                .text_size(scaled(11.0))
+                .child(label.to_owned())
+                .child(format!("{used:.1} / {limit:.1} {unit}")),
+        )
+        .child(
+            div()
+                .h(px(5.0))
+                .rounded_full()
+                .bg(theme.input)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .h_full()
+                        .w(gpui::relative(fraction as f32))
+                        .rounded_full()
+                        .bg(theme.primary_fill()),
+                ),
+        )
+}
+fn open_website(cx: &mut Context<View>, path: &str) {
+    let website = std::env::var("LENNETTE_WEBSITE_URL")
+        .unwrap_or_else(|_| "https://lennette.itssingularity.com".into());
+    cx.open_url(&format!("{}/{path}", website.trim_end_matches('/')));
 }

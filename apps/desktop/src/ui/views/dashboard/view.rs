@@ -19,8 +19,6 @@ enum EditTarget {
     Setting(&'static str),
 }
 
-#[path = "account_banner.rs"]
-mod account_banner;
 #[path = "history.rs"]
 mod history;
 #[path = "meeting_tone.rs"]
@@ -91,6 +89,7 @@ pub struct DashboardView {
     account_task: Option<gpui::Task<()>>,
     account_import: bool,
     account_note: Option<String>,
+    account_usage: Option<serde_json::Value>,
 }
 
 impl DashboardView {
@@ -174,6 +173,7 @@ impl DashboardView {
             account_task: None,
             account_import: false,
             account_note: None,
+            account_usage: None,
         }
     }
 
@@ -252,6 +252,9 @@ impl DashboardView {
         if route == super::nav::Route::Meetings {
             self.name_untitled_meetings(cx);
         }
+        if route == super::nav::Route::Settings && crate::managed::active().is_some() {
+            self.refresh_account_usage(cx);
+        }
     }
 
     /// Give older sessions real titles, using the configured chat model.
@@ -311,6 +314,12 @@ impl DashboardView {
     pub fn account_note(&self) -> Option<&str> {
         self.account_note.as_deref()
     }
+    pub fn account_usage(&self) -> Option<&serde_json::Value> {
+        self.account_usage.as_ref()
+    }
+    pub fn account_busy(&self) -> bool {
+        self.account_task.is_some()
+    }
     pub fn start_account_login(&mut self, provider: &'static str, cx: &mut Context<Self>) {
         if self.account_task.is_some() {
             return;
@@ -327,9 +336,13 @@ impl DashboardView {
             .await;
             this.update(cx, |view, cx| {
                 view.account_task = None;
+                let connected = result.is_ok();
                 view.account_note = Some(result.err().unwrap_or_else(|| {
-                    "Signed in. Choose a subscription below to enable managed AI and sync.".into()
+                    "Account connected. Review your plan and usage below.".into()
                 }));
+                if connected {
+                    view.refresh_account_usage(cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -344,6 +357,7 @@ impl DashboardView {
             let result = crate::managed::sign_out().await;
             this.update(cx, |view, cx| {
                 view.account_task = None;
+                view.account_usage = None;
                 view.account_note = Some(result.err().unwrap_or_else(|| {
                     "Signed out. Local data is available on this device.".into()
                 }));
@@ -362,7 +376,21 @@ impl DashboardView {
         if self.account_task.is_some() {
             return;
         }
-        self.account_task=Some(cx.spawn(async move|this,cx|{let result=crate::managed::usage().await;this.update(cx,|view,cx|{view.account_task=None;view.account_note=Some(match result{Ok(value)=>format!("Plan: {} · AI credit used: ${:.2} · Transcription: {} min · Storage: {} MB",value["subscription"]["plan"].as_str().unwrap_or("No paid plan"),value["ai_used_microdollars"].as_i64().unwrap_or(0) as f64/1_000_000.0,value["transcription_seconds"].as_i64().unwrap_or(0)/60,value["storage_bytes"].as_i64().unwrap_or(0)/1_000_000),Err(e)=>e});cx.notify();}).ok();}));
+        self.account_task = Some(cx.spawn(async move |this, cx| {
+            let result = crate::managed::usage().await;
+            this.update(cx, |view, cx| {
+                view.account_task = None;
+                match result {
+                    Ok(value) => {
+                        view.account_usage = Some(value);
+                        view.account_note = None;
+                    }
+                    Err(error) => view.account_note = Some(error),
+                };
+                cx.notify();
+            })
+            .ok();
+        }));
     }
     pub fn select_managed_model(&mut self, id: &str) {
         if let Some(db) = &self.database {
@@ -2633,18 +2661,16 @@ impl Render for DashboardView {
         }
         let hidden = self.settings.settings.hide_app_icon || crate::cli::private_overlay_enabled();
         if self.native_always_on_top != Some(self.settings.settings.always_on_top) {
-            crate::platform::window::set_always_on_top(
-                window,
-                self.settings.settings.always_on_top,
-            );
+            let above = self.settings.settings.always_on_top;
+            window.defer(cx, move |window, _| {
+                crate::platform::window::set_always_on_top(window, above);
+            });
             self.native_always_on_top = Some(self.settings.settings.always_on_top);
         }
         if self.native_icon_hidden != Some(hidden) {
-            self.settings.notice = match crate::platform::window::set_icon_hidden(window, hidden) {
-                crate::platform::window::Applied::Unsupported if hidden => Some("This compositor controls dock visibility. Use its window rules to hide Lennette's app icon.".into()),
-                crate::platform::window::Applied::Failed => Some("The desktop could not update the app icon visibility.".into()),
-                _ => self.settings.notice.take(),
-            };
+            window.defer(cx, move |window, _| {
+                crate::platform::window::set_icon_hidden(window, hidden);
+            });
             self.native_icon_hidden = Some(hidden);
         }
         // Text sizes are written in rems, so this one value scales the window.
@@ -2842,7 +2868,6 @@ impl Render for DashboardView {
                                 .w(self.content_width)
                                 .flex_shrink_0()
                                 .min_w(px(0.0))
-                                .children(self.account_banner(cx))
                                 .child(if self.dashboard.route().is_setting() {
                                     self.body(window, cx)
                                 } else {

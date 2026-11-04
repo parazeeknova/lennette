@@ -2,49 +2,6 @@
 
 <p align="center">An ambient real-time meeting and discussion copilot.<br />Live transcripts, useful context, and answers when you need them. Built with Rust + GPUI.</p>
 
-
-### Local workspace
-
-Run `bun install --frozen-lockfile`, start Docker Desktop, then run `bun dev`
-from the repository root. This starts the local PostgreSQL, Redis, ClamAV and OpenObserve containers,
-applies migrations, and runs the API and landing together. `bun run dev:web`,
-`bun run dev:api`, and `bun run dev:desktop` run individual apps.
-
-Each app commits safe defaults in `.env.development`. Development commands use
-`cross-env` and a shared environment loader, with root `.env.local`
-overriding app defaults. That local file is optional and ignored; copy
-`.env.local.example` when adding real provider credentials or personal overrides.
-The loader reads `.env.development` and the optional root `.env.local` explicitly.
-Only `VITE_`-prefixed variables should contain values intended for the browser.
-
-`bun run infra:up` starts those four containers and waits for readiness;
-`bun run infra:down` stops them while preserving named data volumes. ClamAV uses
-`infra/clamd.conf` and a loopback-only `127.0.0.1:53310` port. The API's committed
-`.env.development` configures that address. `bun run test:integration` includes a
-real clean/EICAR scan test, in memory, plus direct OpenObserve ingestion checks.
-
-OpenObserve Enterprise v1.1.2 runs at `http://localhost:5080`, with a persisted
-data volume and seven-day retention. Its local-only bootstrap login defaults are
-`dev@lennette.local` / `LocalOnly-Observe123!` in Compose. Override
-`OPENOBSERVE_USER_EMAIL` and `OPENOBSERVE_USER_PASSWORD` in root `.env.local`
-before first startup if needed. Those variables initialize the first account;
-changing them later does not reset an existing OpenObserve password. Never use
-the development credentials in production.
-
-The API exports OTLP logs, metrics and traces directly to OpenObserve using
-authenticated HTTP/protobuf, batching, bounded queues and transient-error retries.
-HTTP totals/latency, PostgreSQL connections/size, Redis clients/memory, and attachment
-cleanup backlog/age are included. Provider requests have child spans for tracing.
-Local ports bind only to loopback. No Collector container or Docker socket mount
-is required. Telemetry is best effort: batches can be lost after retries are exhausted
-or the process crashes. Use a separate production ingestion identity with limited
-permissions, TLS and appropriate retention/access controls. SSO and AI/SRE setup
-are deferred; the Enterprise image does not provision those integrations automatically.
-
-Configure the production API,
-secrets, R2 attachment storage, migrations, and ingress in Dokploy;
-`infra/Dockerfile` remains available to build the API image there.
-
 ### What it does
 
 - **Listen to both sides.** Microphone and system-audio transcription with separate speaker context.
@@ -153,18 +110,6 @@ text backend and launches with blank text. `tests/macos_text.rs` guards this.
 The branded app includes a multi-resolution Finder/Dock icon. Its bundle identity
 is `com.itssingularity.lennette`. The release also includes a branded drag-to-Applications
 DMG; the ZIP is available as an alternative.
-
-Local verification: `cargo fmt --all -- --check`,
-`cargo clippy --locked --workspace --all-targets -- -D warnings`,
-`cargo test --locked --workspace --all-targets`, and
-`bash scripts/macos-smoke.sh target/debug/lennette`. The native check exercises
-window policy, Spaces, stacking, Dock/menu-bar lifecycle, hotkey registration,
-conflict detection, dispatch/cleanup, and real CoreMedia PCM buffering and errors.
-It requests no recording permissions. Before release, manually test real microphone
-and call audio, permission denial/revocation, Retina/external displays, next-login
-startup, and shortcuts while hidden. Validate each meeting app from a separate
-receiver; full-display invisibility is not guaranteed by these checks.
-Developer ID signing and notarization require the maintainer's credentials.
 
 ### Windows
 

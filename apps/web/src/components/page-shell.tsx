@@ -215,6 +215,12 @@ export const SiteFooter = () => (
         <Link to="/pricing" className={pillLinkClassName}>
           <span>Pricing</span>
         </Link>
+        <Link to="/terms" className={pillLinkClassName}>
+          <span>Terms of Service</span>
+        </Link>
+        <Link to="/privacy" className={pillLinkClassName}>
+          <span>Privacy Policy</span>
+        </Link>
         <a
           href="https://itssingularity.com"
           target="_blank"

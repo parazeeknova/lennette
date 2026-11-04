@@ -8,6 +8,20 @@ import {
 } from "./site";
 
 export const SEO_PAGES = {
+  "/terms": {
+    name: "Terms of Service",
+    title: "Lennette Terms of Service | Singularity Works",
+    description:
+      "Read the terms for Lennette, including responsible meeting use, accounts, managed subscriptions, payments, and account deletion.",
+    type: "WebPage",
+  },
+  "/privacy": {
+    name: "Privacy Policy",
+    title: "Lennette Privacy Policy | Your Content & Choices",
+    description:
+      "Learn how Lennette handles local and managed meeting data, AI processing, attachments, cookies, retention, and privacy requests.",
+    type: "WebPage",
+  },
   "/": {
     name: "Lennette AI Meeting Copilot",
     title: "Lennette | Live AI Meeting Copilot for Windows & Linux",

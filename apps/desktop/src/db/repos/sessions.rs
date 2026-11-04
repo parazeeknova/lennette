@@ -1,5 +1,5 @@
 //! Restore a conversation's explicit context and the AI thread belonging to a meeting.
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::db::connection::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -42,7 +42,7 @@ pub fn load(connection: &Connection, id: &str) -> Result<Option<SavedContext>, S
         .transpose()
 }
 pub fn meeting_chat(connection: &Connection, meeting: &str) -> crate::db::Result<Option<String>> {
-    Ok(connection.query_row("SELECT c.id FROM conversations c JOIN meeting_conversations mc ON mc.conversation_id=c.id WHERE mc.meeting_id=?1 ORDER BY c.updated_at DESC LIMIT 1", [meeting], |r| r.get(0)).optional()?)
+    connection.query_row("SELECT c.id FROM conversations c JOIN meeting_conversations mc ON mc.conversation_id=c.id WHERE mc.meeting_id=?1 ORDER BY c.updated_at DESC LIMIT 1", [meeting], |r| r.get(0)).optional()
 }
 
 #[cfg(test)]

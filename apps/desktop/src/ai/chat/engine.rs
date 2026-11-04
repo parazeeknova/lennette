@@ -219,6 +219,24 @@ pub async fn stream_chat_bounded<F: std::future::Future<Output = ()>>(
     mut on_text: impl FnMut(String) -> F,
 ) -> Result<String, ChatError> {
     let started = std::time::Instant::now();
+    let managed_config;
+    let config = if config.api_key == "managed-session" {
+        let account = crate::managed::active().ok_or(ChatError::NotConfigured)?;
+        managed_config = {
+            let mut config = config.clone();
+            config.api_key = account
+                .access_token()
+                .await
+                .map_err(|e| ChatError::Protocol(e.to_string()))?;
+            crate::managed::save_session(&account)
+                .await
+                .map_err(ChatError::Protocol)?;
+            config
+        };
+        &managed_config
+    } else {
+        config
+    };
     let mut first = true;
     let result = stream_chat_inner(client, config, history, context, cancel, |text| {
         if first {
@@ -265,6 +283,12 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     let mut cancellation = (*cancel).clone();
 
     let mut body = build_body(provider, config, history, context);
+    if config.base_url.contains("/v1/chat/completions") && crate::managed::active().is_some() {
+        body["max_tokens"] = json!(2048);
+        if let Some(meeting) = crate::managed::meeting() {
+            body["meeting_id"] = json!(meeting);
+        }
+    }
     let streaming = config.custom.as_ref().is_none_or(|custom| custom.streaming);
     body["stream"] = json!(streaming);
     let mut request = if let Some(custom) = &config.custom {

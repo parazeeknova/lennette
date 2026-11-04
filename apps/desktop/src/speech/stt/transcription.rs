@@ -64,6 +64,34 @@ pub async fn transcribe(
     wav: Vec<u8>,
     language: Option<&str>,
 ) -> Result<String, SttError> {
+    if config.api_key == "managed-session" {
+        let account = crate::managed::active().ok_or(SttError::NotConfigured)?;
+        let token = account
+            .access_token()
+            .await
+            .map_err(|e| SttError::Protocol(e.to_string()))?;
+        crate::managed::save_session(&account)
+            .await
+            .map_err(SttError::Protocol)?;
+        let response = account
+            .http
+            .post(
+                account
+                    .url("/v1/speech/transcribe")
+                    .map_err(|e| SttError::Protocol(e.to_string()))?,
+            )
+            .bearer_auth(token)
+            .header("content-type", "audio/wav")
+            .body(wav)
+            .send()
+            .await?;
+        let response = lennette_sync_client::checked(response)
+            .await
+            .map_err(|e| SttError::Protocol(e.to_string()))?;
+        let value: Value = response.json().await?;
+        return extract_transcript(SttProvider::by_id("deepgram-stt").unwrap(), &value)
+            .ok_or_else(|| SttError::Protocol("no transcript returned".into()));
+    }
     transcribe_inner(config, wav, language)
         .await
         .map_err(|error| {
@@ -472,6 +500,31 @@ pub struct LiveTranscriber {
 
 impl LiveTranscriber {
     pub async fn connect_config(config: &ProviderConfig) -> Result<Self, SttError> {
+        if config.api_key == "managed-session" {
+            crate::managed::flush().await.map_err(SttError::Protocol)?;
+            let account = crate::managed::active().ok_or(SttError::NotConfigured)?;
+            let meeting = crate::managed::meeting().ok_or_else(|| {
+                SttError::Protocol("start a meeting before live transcription".into())
+            })?;
+            let mut url = account
+                .url(&format!("/v1/speech/live?meeting_id={meeting}"))
+                .map_err(|e| SttError::Protocol(e.to_string()))?;
+            let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
+            url.set_scheme(scheme)
+                .map_err(|_| SttError::Protocol("invalid managed speech URL".into()))?;
+            let token = account
+                .access_token()
+                .await
+                .map_err(|e| SttError::Protocol(e.to_string()))?;
+            crate::managed::save_session(&account)
+                .await
+                .map_err(SttError::Protocol)?;
+            return Self::connect_authenticated(
+                url.to_string(),
+                Some(("Authorization".into(), format!("Bearer {token}"))),
+            )
+            .await;
+        }
         if !config.speech_usable() {
             return Err(SttError::NotConfigured);
         }

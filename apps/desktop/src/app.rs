@@ -161,6 +161,7 @@ pub fn run() {
     // Grammar decoding is CPU work and must not delay the first window.
     std::thread::spawn(crate::ui::widgets::syntax::warm_up);
     let services = Services::open();
+    crate::managed::init(services.database_path.as_deref());
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         database = services.database_ready,

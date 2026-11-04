@@ -2,7 +2,7 @@
 //!
 //! Seed defaults and upgrade untouched built-in text while preserving user edits.
 
-use rusqlite::params;
+use crate::db::connection::params;
 
 use crate::db::Result;
 
@@ -101,7 +101,7 @@ const PREVIOUS_DEFAULTS: &[(i64, &str)] = &[
 /// Insert any missing default listen modes.
 ///
 /// Only exact previous built-in text is upgraded. User edits are retained.
-pub fn seed_listen_modes(connection: &rusqlite::Connection) -> Result<()> {
+pub fn seed_listen_modes(connection: &crate::db::connection::Connection) -> Result<()> {
     for mode in DEFAULT_LISTEN_MODES {
         if crate::db::settings::get(connection, &format!("deleted_listen_slot_{}", mode.slot))?
             .as_deref()

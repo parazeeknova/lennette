@@ -4,8 +4,8 @@
 //! loses the conversation so far. Finished meetings are listed here with their
 //! line counts and durations.
 
-use rusqlite::OptionalExtension;
-use rusqlite::{Connection, params};
+use crate::db::connection::OptionalExtension;
+use crate::db::connection::{Connection, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,7 +18,7 @@ pub struct Recap {
     pub error: String,
 }
 pub fn recap(connection: &Connection, id: &str) -> Result<Option<Recap>> {
-    Ok(connection
+    connection
         .query_row(
             "SELECT content, status, error FROM meeting_recaps WHERE meeting_id = ?1",
             params![id],
@@ -30,7 +30,7 @@ pub fn recap(connection: &Connection, id: &str) -> Result<Option<Recap>> {
                 })
             },
         )
-        .optional()?)
+        .optional()
 }
 pub fn begin_recap(connection: &Connection, id: &str) -> Result<()> {
     connection.execute("INSERT INTO meeting_recaps (meeting_id) VALUES (?1) ON CONFLICT(meeting_id) DO UPDATE SET status='pending', error='', updated_at=datetime('now')", params![id])?;
@@ -125,9 +125,7 @@ pub fn finish(connection: &Connection, meeting_id: &str, duration_seconds: i64) 
 /// Resume recording into the same session without changing its existing speech.
 pub fn reopen(connection: &Connection, id: &str) -> Result<()> {
     if connection.execute("UPDATE meetings SET ended_at=NULL WHERE id=?1", [id])? == 0 {
-        return Err(crate::db::DbError::Sqlite(
-            rusqlite::Error::QueryReturnedNoRows,
-        ));
+        return Err(crate::db::DbError::NoRows);
     }
     Ok(())
 }
@@ -207,7 +205,7 @@ pub fn search(connection: &Connection, query: &str, limit: usize) -> Result<Vec<
             line_count: row.get(7)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Lines for one session, in spoken order.
@@ -227,7 +225,7 @@ pub fn lines(connection: &Connection, meeting_id: &str) -> Result<Vec<LineRecord
             end_time: row.get(5)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Recent speech for restoring the live view without loading an entire meeting.
@@ -345,7 +343,7 @@ pub fn speaker_names(
     let rows = statement.query_map(params![meeting_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Format a duration as `mm:ss`.

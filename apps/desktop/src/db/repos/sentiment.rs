@@ -1,6 +1,6 @@
 //! Encrypted, cached meeting tone assessments and bounded source sampling.
+use crate::db::connection::{Connection, OptionalExtension, params};
 use crate::db::{Result, meetings::LineRecord};
-use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,7 +10,7 @@ pub struct Revision {
 }
 
 pub fn revision(db: &Connection, id: &str) -> Result<Revision> {
-    Ok(db.query_row(
+    db.query_row(
         "SELECT count(*), coalesce(max(rowid),0) FROM meeting_lines WHERE meeting_id=?1",
         [id],
         |r| {
@@ -19,7 +19,7 @@ pub fn revision(db: &Connection, id: &str) -> Result<Revision> {
                 last_row: r.get(1)?,
             })
         },
-    )?)
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -61,9 +61,9 @@ pub struct Saved {
 }
 
 pub fn get(db: &Connection, id: &str) -> Result<Option<Saved>> {
-    Ok(db.query_row("SELECT content,status,error,source_lines,source_last_row,updated_at FROM meeting_sentiment WHERE meeting_id=?1", [id], |r| Ok(Saved {
+    db.query_row("SELECT content,status,error,source_lines,source_last_row,updated_at FROM meeting_sentiment WHERE meeting_id=?1", [id], |r| Ok(Saved {
         content:r.get(0)?,status:r.get(1)?,error:r.get(2)?,revision:Revision {lines:r.get(3)?,last_row:r.get(4)?},updated_at:r.get(5)?,
-    })).optional()?)
+    })).optional()
 }
 
 pub fn begin(db: &Connection, id: &str, revision: Revision) -> Result<()> {

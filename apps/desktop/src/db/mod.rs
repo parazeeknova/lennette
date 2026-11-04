@@ -4,9 +4,11 @@
 //! the document library and shared settings. Repositories keep SQL in one place
 //! so views never build queries inline.
 
+pub mod connection;
 mod encryption;
 pub mod repos;
 pub mod schema;
+pub mod sync;
 
 pub use repos::conversations;
 pub use repos::library;
@@ -16,14 +18,16 @@ pub use repos::sessions;
 pub use repos::settings;
 pub use schema::seed;
 
-use rusqlite::Connection;
+use connection::Connection;
 use std::path::Path;
 
 /// Errors from the local database.
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error("database error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    Orm(#[from] sea_orm::DbErr),
+    #[error("record no longer exists")]
+    NoRows,
     #[error("database I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
@@ -66,6 +70,7 @@ impl Database {
         connection.execute_batch(schema::SCHEMA)?;
         seed::seed_listen_modes(&connection)?;
         profiles::migrate_legacy(&connection)?;
+        sync::install(&connection)?;
         Ok(Self { connection })
     }
 

@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use rusqlite::{Connection, params};
+use crate::db::connection::{Connection, params};
 
 use crate::db::Result;
 
@@ -13,7 +13,7 @@ use crate::db::Result;
 pub fn all(connection: &Connection) -> Result<BTreeMap<String, String>> {
     let mut statement = connection.prepare("SELECT key, value FROM app_settings")?;
     let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get(1)?)))?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Read one setting.
@@ -65,7 +65,7 @@ pub fn prompts(connection: &Connection) -> Result<Vec<PromptRecord>> {
             listen_slot: row.get(3)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// The five listen-mode prompts, in tab order.
@@ -93,7 +93,7 @@ pub fn update_prompt(connection: &Connection, id: i64, name: &str, prompt: &str)
 
 /// Delete a prompt.
 pub fn delete_prompt(connection: &Connection, id: i64) -> Result<()> {
-    use rusqlite::OptionalExtension;
+    use crate::db::connection::OptionalExtension;
     let slot: Option<i64> = connection
         .query_row(
             "SELECT listen_slot FROM system_prompts WHERE id=?1",

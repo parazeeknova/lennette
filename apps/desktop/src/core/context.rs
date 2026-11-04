@@ -16,6 +16,10 @@ pub struct Attachment {
     pub text: String,
     pub image: Option<String>,
     pub truncated: bool,
+    #[serde(default)]
+    pub blob_id: Option<String>,
+    #[serde(default)]
+    pub remote_blob_id: Option<String>,
 }
 
 impl Attachment {
@@ -27,6 +31,8 @@ impl Attachment {
             text: text.chars().take(MAX_TEXT_CHARS).collect(),
             image: None,
             truncated,
+            blob_id: None,
+            remote_blob_id: None,
         }
     }
 }
@@ -83,7 +89,9 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err("Files must be 10 MB or smaller.".into());
     }
-    let id = format!("file:{}", path.display());
+    use sha2::Digest;
+    let id =
+        uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, &sha2::Sha256::digest(&bytes)).to_string();
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -96,7 +104,7 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
         .to_ascii_lowercase();
     if matches!(extension.as_str(), "png" | "jpg" | "jpeg") {
         use base64::Engine;
-        let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
             .with_guessed_format()
             .map_err(|e| e.to_string())?;
         let mut limits = image::Limits::default();
@@ -112,12 +120,24 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
         image
             .write_to(&mut png, image::ImageFormat::Png)
             .map_err(|e| e.to_string())?;
+        let blob_id = crate::managed::cache_attachment(
+            &id,
+            &name,
+            if extension == "png" {
+                "image/png"
+            } else {
+                "image/jpeg"
+            },
+            &bytes,
+        )?;
         return Ok(Attachment {
             id,
             name,
             text: String::new(),
             image: Some(base64::engine::general_purpose::STANDARD.encode(png.into_inner())),
             truncated: false,
+            blob_id,
+            remote_blob_id: None,
         });
     }
     let text = if extension == "pdf" {
@@ -127,13 +147,25 @@ pub fn import(path: &Path) -> Result<Attachment, String> {
         if bytes.contains(&0) {
             return Err("Use a text, Markdown, code, PDF, PNG or JPEG file.".into());
         }
-        String::from_utf8(bytes)
+        String::from_utf8(bytes.clone())
             .map_err(|_| "This file is not UTF-8 text. Use text, PDF, PNG or JPEG.".to_owned())?
     };
     if text.trim().is_empty() {
         return Err("No readable text found. Scanned PDFs need OCR first.".into());
     }
-    Ok(Attachment::text(id, name, text))
+    let blob_id = crate::managed::cache_attachment(
+        &id,
+        &name,
+        if extension == "pdf" {
+            "application/pdf"
+        } else {
+            "text/plain"
+        },
+        &bytes,
+    )?;
+    let mut attachment = Attachment::text(id, name, text);
+    attachment.blob_id = blob_id;
+    Ok(attachment)
 }
 
 #[cfg(test)]

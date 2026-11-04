@@ -1,6 +1,6 @@
 //! Reusable, explicitly selected background for conversations.
 use super::settings;
-use rusqlite::{Connection, OptionalExtension, params};
+use crate::db::connection::{Connection, OptionalExtension, params};
 
 pub const SELECTED_KEY: &str = "selected_context_profile";
 const MIGRATED_KEY: &str = "context_profiles_migrated";
@@ -23,7 +23,7 @@ pub fn list(connection: &Connection) -> crate::db::Result<Vec<Profile>> {
             meeting_context: row.get(3)?,
         })
     })?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    rows.collect::<Result<_, _>>()
 }
 
 pub fn selected(connection: &Connection) -> crate::db::Result<Option<Profile>> {
@@ -31,7 +31,7 @@ pub fn selected(connection: &Connection) -> crate::db::Result<Option<Profile>> {
     let mut query = connection.prepare(
         "SELECT id, name, personal_context, meeting_context FROM context_profiles WHERE id = ?1",
     )?;
-    Ok(query
+    query
         .query_row([id], |row| {
             Ok(Profile {
                 id: row.get(0)?,
@@ -40,7 +40,7 @@ pub fn selected(connection: &Connection) -> crate::db::Result<Option<Profile>> {
                 meeting_context: row.get(3)?,
             })
         })
-        .optional()?)
+        .optional()
 }
 
 pub fn select(connection: &Connection, id: Option<&str>) -> Result<(), String> {

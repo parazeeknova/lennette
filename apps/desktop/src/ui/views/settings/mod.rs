@@ -18,6 +18,7 @@ use crate::ui::dashboard::nav::Route;
 use crate::ui::icons;
 use crate::ui::theme::scaled;
 use crate::ui::theme::{Theme, radius, space};
+mod account;
 pub(crate) mod custom;
 mod search;
 
@@ -1553,7 +1554,7 @@ pub fn render(
             Route::Settings => {
                 let app = app_settings(state, theme, cx);
                 let screenshots = screenshot_settings(state, theme, cx);
-                stack(vec![app, screenshots])
+                stack(vec![account::panel(view, theme, cx), app, screenshots])
             }
             Route::Responses => response_settings(view, state, theme, cx),
             Route::Audio => audio_settings(view, state, theme, cx),

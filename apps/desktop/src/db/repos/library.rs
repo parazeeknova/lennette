@@ -1,6 +1,6 @@
 //! Document library and attached prompt knowledge.
 
-use rusqlite::{Connection, params};
+use crate::db::connection::{Connection, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -53,7 +53,7 @@ pub fn list(connection: &Connection) -> Result<Vec<FileRecord>> {
             created_at: row.get(6)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Rename a document.
@@ -85,7 +85,7 @@ pub fn prompt_files(connection: &Connection, prompt_id: &str) -> Result<Vec<Stri
     let mut statement =
         connection.prepare("SELECT file_id FROM prompt_files WHERE prompt_id = ?1")?;
     let rows = statement.query_map(params![prompt_id], |row| row.get(0))?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 #[cfg(test)]

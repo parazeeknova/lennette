@@ -1,0 +1,12 @@
+{
+  "name": "@lennette/desktop",
+  "private": true,
+  "version": "0.18.26",
+  "scripts": {
+    "dev": "cargo run -p lennette",
+    "build": "cargo build -p lennette --release",
+    "typecheck": "cargo check -p lennette --all-targets",
+    "lint": "cargo clippy -p lennette --all-targets -- -D warnings",
+    "test": "cargo test -p lennette --lib"
+  }
+}

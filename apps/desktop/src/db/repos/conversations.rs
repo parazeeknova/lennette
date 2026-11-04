@@ -1,6 +1,6 @@
 //! Conversations and their messages.
 
-use rusqlite::{Connection, params};
+use crate::db::connection::{Connection, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -88,7 +88,7 @@ pub fn search(
             preview: row.get(5)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Append a message, returning its id.
@@ -135,7 +135,7 @@ pub fn messages(connection: &Connection, conversation_id: &str) -> Result<Vec<Me
             timestamp: row.get(3)?,
         })
     })?;
-    Ok(rows.collect::<std::result::Result<_, _>>()?)
+    rows.collect::<std::result::Result<_, _>>()
 }
 
 /// Read only the recent window, bounding old message bodies in SQLite before
@@ -189,7 +189,7 @@ pub fn require_conversation(connection: &Connection, id: &str) -> Result<()> {
         |row| row.get(0),
     )?;
     if exists == 0 {
-        return Err(DbError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+        return Err(DbError::NoRows);
     }
     Ok(())
 }

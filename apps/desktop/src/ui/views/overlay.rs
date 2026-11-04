@@ -886,6 +886,7 @@ impl Overlay {
 
     /// Stream raw two-channel PCM as capture runs; never wait for a local utterance.
     fn spawn_transcription(&mut self, cx: &mut Context<Self>) {
+        crate::managed::set_meeting(self.meeting_id.as_deref());
         let Some(config) = self.speech.clone() else {
             return;
         };
@@ -3067,6 +3068,9 @@ impl Overlay {
     }
 
     fn speech_config(&self) -> Option<crate::features::providers::ProviderConfig> {
+        if let Some(config) = crate::managed::speech_config() {
+            return Some(config);
+        }
         let settings = crate::features::settings::Settings::load_from_path(
             self.services.database_path.as_deref(),
         )
@@ -3096,6 +3100,9 @@ impl Overlay {
     }
 
     fn selected_chat_config(&self) -> Option<crate::features::providers::ProviderConfig> {
+        if let Some(config) = crate::managed::chat_config() {
+            return Some(config);
+        }
         let vault = self.services.vault.as_ref().as_ref()?;
         let provider = self.model_provider.as_deref()?;
         let mut config = crate::features::credentials::load(

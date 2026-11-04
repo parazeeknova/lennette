@@ -2,10 +2,10 @@
 //!
 //! A private adjacent random key protects copies of the database, not a compromised
 //! user account. Existing plaintext is exported and verified before atomic replacement.
+use super::connection::{Connection, params};
 use super::{DbError, Result};
 use crate::core::security::files;
 use rand::Rng;
-use rusqlite::Connection;
 use std::{
     fs,
     io::{Read, Write},
@@ -49,8 +49,7 @@ fn key(path: &Path, encrypted_exists: bool) -> Result<String> {
 }
 
 fn unlock(path: &Path, key: &str) -> Result<Connection> {
-    let connection = Connection::open(path)?;
-    connection.pragma_update(None, "key", key)?;
+    let connection = Connection::encrypted(path, key)?;
     // Force authentication now; wrong keys/corruption must never trigger reinitialization.
     connection.query_row("SELECT count(*) FROM sqlite_master", [], |_| Ok(()))?;
     Ok(connection)
@@ -77,7 +76,7 @@ pub(super) fn open(path: &Path) -> Result<Connection> {
 fn migrate(path: &Path, key: &str) -> Result<()> {
     let original = Connection::open(path)?;
     original.execute_batch("PRAGMA temp_store=MEMORY")?;
-    original.busy_timeout(std::time::Duration::from_secs(1))?;
+    original.execute_batch("PRAGMA busy_timeout=1000")?;
     // Switching out of WAL checkpoints all committed pages and fails if another
     // process still holds a reader/writer. Do not replace a live WAL database.
     let mode: String = original.query_row("PRAGMA journal_mode=DELETE", [], |r| r.get(0))?;
@@ -91,7 +90,7 @@ fn migrate(path: &Path, key: &str) -> Result<()> {
     let result = (|| -> Result<()> {
         original.execute(
             "ATTACH DATABASE ?1 AS encrypted KEY ?2",
-            rusqlite::params![
+            params![
                 temporary
                     .to_str()
                     .ok_or(DbError::Storage("history path is not UTF-8"))?,
@@ -100,7 +99,7 @@ fn migrate(path: &Path, key: &str) -> Result<()> {
         )?;
         original.query_row("SELECT sqlcipher_export('encrypted')", [], |_| Ok(()))?;
         let version: i64 = original.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        original.pragma_update(Some("encrypted"), "user_version", version)?;
+        original.execute_batch(&format!("PRAGMA encrypted.user_version={version}"))?;
         original.execute_batch("DETACH DATABASE encrypted")?;
         let verified = unlock(&temporary, key)?;
         let integrity: String = verified.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
@@ -128,6 +127,7 @@ fn migrate(path: &Path, key: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::connection::Connection;
     use crate::db::{Database, conversations, library, meetings, profiles};
 
     fn path() -> PathBuf {
@@ -151,13 +151,7 @@ mod tests {
             assert!(!bytes.starts_with(b"SQLite format 3"));
             assert!(!bytes.windows(secret.len()).any(|p| p == secret.as_bytes()));
         }
-        let raw = Connection::open(&path).unwrap();
-        assert!(
-            raw.query_row("SELECT count(*) FROM sqlite_master", [], |r| r
-                .get::<_, i64>(0))
-                .is_err()
-        );
-        drop(raw);
+        assert!(Connection::open(&path).is_err());
         drop(db);
         let reopened = Database::open(&path).unwrap();
         assert_eq!(

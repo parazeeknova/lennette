@@ -86,6 +86,9 @@ pub struct DashboardView {
     title_task: Option<gpui::Task<()>>,
     /// Chat provider used to name old sessions, when one is configured.
     title_config: Option<crate::features::providers::ProviderConfig>,
+    account_task: Option<gpui::Task<()>>,
+    account_import: bool,
+    account_note: Option<String>,
 }
 
 impl DashboardView {
@@ -166,6 +169,9 @@ impl DashboardView {
             custom_motion: crate::ui::widgets::motion::Transition::new(0.0),
             title_task: None,
             title_config,
+            account_task: None,
+            account_import: false,
+            account_note: None,
         }
     }
 
@@ -292,6 +298,97 @@ impl DashboardView {
     /// Mutable settings state, for page controls.
     pub fn settings_mut(&mut self) -> &mut SettingsState {
         &mut self.settings
+    }
+
+    pub fn account_import(&self) -> bool {
+        self.account_import
+    }
+    pub fn toggle_account_import(&mut self) {
+        self.account_import = !self.account_import;
+    }
+    pub fn account_note(&self) -> Option<&str> {
+        self.account_note.as_deref()
+    }
+    pub fn start_account_login(&mut self, provider: &'static str, cx: &mut Context<Self>) {
+        if self.account_task.is_some() {
+            return;
+        }
+        let import = self.account_import;
+        self.account_note = Some("Opening sign-in in your browser…".into());
+        self.account_task = Some(cx.spawn(async move |this, cx| {
+            let result = async {
+                let login = crate::managed::begin_login(provider).await?;
+                this.update(cx, |_, cx| cx.open_url(&login.authorization_url))
+                    .map_err(|e| e.to_string())?;
+                crate::managed::complete_login(login, import).await
+            }
+            .await;
+            this.update(cx, |view, cx| {
+                view.account_task = None;
+                view.account_note = Some(result.err().unwrap_or_else(|| {
+                    "Signed in. Choose a subscription below to enable managed AI and sync.".into()
+                }));
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+    pub fn sign_out_account(&mut self, cx: &mut Context<Self>) {
+        if self.account_task.is_some() {
+            return;
+        }
+        self.account_task = Some(cx.spawn(async move |this, cx| {
+            let result = crate::managed::sign_out().await;
+            this.update(cx, |view, cx| {
+                view.account_task = None;
+                view.account_note = Some(result.err().unwrap_or_else(|| {
+                    "Signed out. Local data is available on this device.".into()
+                }));
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+    pub fn open_account_billing(&mut self, plan: Option<&'static str>, cx: &mut Context<Self>) {
+        if self.account_task.is_some() {
+            return;
+        }
+        self.account_task=Some(cx.spawn(async move|this,cx|{let result=crate::managed::billing_url(plan).await;this.update(cx,|view,cx|{view.account_task=None;match result{Ok(url)=>{cx.open_url(&url);view.account_note=Some("Billing opened in your browser. Access updates after payment is confirmed.".into());},Err(e)=>view.account_note=Some(e)}cx.notify();}).ok();}));
+    }
+    pub fn refresh_account_usage(&mut self, cx: &mut Context<Self>) {
+        if self.account_task.is_some() {
+            return;
+        }
+        self.account_task=Some(cx.spawn(async move|this,cx|{let result=crate::managed::usage().await;this.update(cx,|view,cx|{view.account_task=None;view.account_note=Some(match result{Ok(value)=>format!("Plan: {} · AI credit used: ${:.2} · Transcription: {} min · Storage: {} MB",value["subscription"]["plan"].as_str().unwrap_or("No paid plan"),value["ai_used_microdollars"].as_i64().unwrap_or(0) as f64/1_000_000.0,value["transcription_seconds"].as_i64().unwrap_or(0)/60,value["storage_bytes"].as_i64().unwrap_or(0)/1_000_000),Err(e)=>e});cx.notify();}).ok();}));
+    }
+    pub fn select_managed_model(&mut self, id: &str) {
+        if let Some(db) = &self.database {
+            self.account_note = crate::db::settings::set(db.connection(), "chat_model", id)
+                .err()
+                .map(|e| e.to_string())
+                .or_else(|| Some(format!("Managed model: {id}")));
+        }
+    }
+    pub fn resolve_account_conflicts(&mut self, keep_local: bool, cx: &mut Context<Self>) {
+        if self.account_task.is_some() {
+            return;
+        }
+        self.account_task = Some(cx.spawn(async move |this, cx| {
+            let result =
+                tokio::task::spawn_blocking(move || crate::managed::resolve_conflicts(keep_local))
+                    .await;
+            this.update(cx, |view, cx| {
+                view.account_task = None;
+                view.account_note = Some(match result {
+                    Ok(Ok(())) => "Conflicts resolved. Sync will retry.".into(),
+                    Ok(Err(e)) => e,
+                    Err(e) => e.to_string(),
+                });
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     /// Persist settings after a control changes.

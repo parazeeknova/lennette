@@ -8,6 +8,7 @@ pub mod core;
 pub mod db;
 pub mod features;
 pub mod identity;
+pub mod managed;
 pub mod platform;
 pub mod speech;
 pub mod ui;

@@ -9,9 +9,9 @@ import {
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import { AccountPage } from "@/components/account/account-page";
 import type * as AccountApi from "@/lib/account-api";
 import { AccountError } from "@/lib/account-api";
-import { AccountPage } from "@/routes/account";
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@tanstack/react-router", async (original) => ({

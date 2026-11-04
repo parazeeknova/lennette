@@ -353,3 +353,286 @@
 details > summary::-webkit-details-marker {
   display: none;
 }
+
+/* Miniature product scenes for the managed-account introduction. */
+.account-welcome {
+  background-color: oklch(0.96 0.025 235 / 0.45);
+}
+.account-provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  border: 1px solid oklch(1 0 0 / 0.9);
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.75);
+  padding: 0.9rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 4px 12px oklch(0.4 0.05 240 / 0.06);
+  transition:
+    background 180ms,
+    transform 180ms;
+  &:hover:not(:disabled) {
+    background: white;
+    transform: translateY(-2px);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--sky-deep);
+    outline-offset: 4px;
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: wait;
+  }
+}
+.account-feature {
+  transition: transform 300ms;
+}
+.account-feature:hover {
+  transform: translateY(-5px);
+}
+.account-scene {
+  position: relative;
+  display: flex;
+  height: 250px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 24px;
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    oklch(0.87 0.065 235 / 0.7),
+    transparent 72%
+  );
+  mask-image: linear-gradient(black 86%, transparent);
+}
+.account-mini-window,
+.account-desktop,
+.account-phone,
+.account-file {
+  position: relative;
+  border: 1px solid oklch(1 0 0 / 0.95);
+  background: oklch(1 0 0 / 0.78);
+  box-shadow: 0 12px 28px oklch(0.4 0.08 245 / 0.1);
+  border-radius: 14px;
+}
+.account-mini-window {
+  width: 100%;
+  max-width: 250px;
+  padding: 16px;
+  transform: rotate(-3deg);
+  animation: account-float 7s ease-in-out infinite;
+}
+.account-window-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--sky-deep);
+}
+.account-live-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #459b89;
+  box-shadow: 0 0 0 3px #459b8915;
+}
+.account-wave {
+  display: flex;
+  height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.account-wave i {
+  width: 4px;
+  border-radius: 4px;
+  background: var(--sky-deep);
+  opacity: 0.6;
+  animation: account-wave 1.4s ease-in-out infinite alternate;
+}
+.account-ai-reply {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: oklch(0.93 0.03 240 / 0.8);
+  font-size: 10px;
+  line-height: 1.5;
+  animation: account-reply 5s ease-in-out infinite;
+}
+.account-text-lines {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.account-text-lines i {
+  display: block;
+  height: 4px;
+  width: 90%;
+  border-radius: 4px;
+  background: oklch(0.65 0.045 240 / 0.2);
+}
+.account-text-lines i:nth-child(2) {
+  width: 72%;
+}
+.account-text-lines i:nth-child(3) {
+  width: 82%;
+}
+.account-desktop {
+  width: 180px;
+  padding: 15px;
+  margin-left: -30px;
+  transform: rotate(-5deg);
+}
+.account-sync-answer {
+  margin-top: 15px;
+  padding: 10px 7px;
+  border-radius: 7px;
+  background: oklch(0.92 0.04 235 / 0.65);
+  font-size: 9px;
+  color: var(--sky-deep);
+  animation: account-reply 5s ease-in-out infinite;
+}
+.account-phone {
+  position: absolute;
+  right: 25px;
+  bottom: 35px;
+  width: 89px;
+  height: 152px;
+  padding: 12px 9px;
+  border-width: 3px;
+  border-radius: 20px;
+  transform: rotate(7deg);
+  animation: account-phone 7s ease-in-out infinite;
+}
+.account-phone .account-sync-answer {
+  font-size: 7px;
+  animation-delay: 0.7s;
+}
+.account-sync-orbit {
+  position: absolute;
+  width: 210px;
+  height: 210px;
+  border: 1px dashed oklch(0.6 0.08 245 / 0.25);
+  border-radius: 50%;
+  animation: account-orbit 40s linear infinite;
+}
+.account-sync-orbit::after {
+  content: "";
+  position: absolute;
+  top: 28px;
+  left: 28px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sky-deep);
+  box-shadow: 0 0 0 5px oklch(0.7 0.08 245 / 0.15);
+}
+.account-sync-badge {
+  position: absolute;
+  bottom: 25px;
+  left: 28px;
+  border: 1px solid white;
+  border-radius: 30px;
+  background: oklch(0.98 0.015 170);
+  padding: 6px 10px;
+  color: #397560;
+  font-size: 9px;
+}
+.account-file {
+  position: absolute;
+  width: 165px;
+  height: 175px;
+  padding: 16px;
+}
+.account-file p {
+  margin-top: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.account-file-type {
+  display: inline-block;
+  border-radius: 5px;
+  padding: 3px 5px;
+  background: oklch(0.92 0.03 245);
+  color: var(--sky-deep);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+.account-file-back {
+  transform: translate(-27px, -7px) rotate(-12deg);
+  background: oklch(0.95 0.025 235);
+}
+.account-file-front {
+  transform: translate(20px, 12px) rotate(5deg);
+  animation: account-file 8s ease-in-out infinite;
+}
+@keyframes account-wave {
+  from {
+    transform: scaleY(0.35);
+    opacity: 0.3;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 0.75;
+  }
+}
+@keyframes account-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(-1deg);
+  }
+}
+@keyframes account-phone {
+  0%,
+  100% {
+    transform: translateY(0) rotate(7deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(4deg);
+  }
+}
+@keyframes account-file {
+  0%,
+  100% {
+    transform: translate(20px, 12px) rotate(5deg);
+  }
+  50% {
+    transform: translate(17px, 5px) rotate(2deg);
+  }
+}
+@keyframes account-reply {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  40%,
+  75% {
+    opacity: 1;
+  }
+}
+@keyframes account-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .account-scene *,
+  .account-feature,
+  .account-provider {
+    animation: none !important;
+    transition: none !important;
+  }
+  .account-feature:hover,
+  .account-provider:hover:not(:disabled) {
+    transform: none;
+  }
+}

@@ -24,6 +24,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::{Message as UpstreamMessage, client::IntoClientRequest};
+use tracing::Instrument;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -187,6 +188,11 @@ pub async fn chat(
         .bearer_auth(state.config.merge_key.expose_secret())
         .json(&payload)
         .send()
+        .instrument(tracing::info_span!(
+            "merge.chat",
+            otel.kind = "client",
+            server.address = state.config.merge_url.host_str().unwrap_or("merge")
+        ))
         .await?;
     if !upstream.status().is_success() {
         billing::settle(&state, reservation, 0).await?;
@@ -292,7 +298,13 @@ pub async fn speech(
             .parse()
             .map_err(anyhow::Error::from)?,
     );
-    let upstream = tokio_tungstenite::connect_async(upstream_request).await;
+    let upstream = tokio_tungstenite::connect_async(upstream_request)
+        .instrument(tracing::info_span!(
+            "deepgram.connect",
+            otel.kind = "client",
+            server.address = state.config.deepgram_url.host_str().unwrap_or("deepgram")
+        ))
+        .await;
     let (upstream, _) = match upstream {
         Ok(u) => u,
         Err(_) => {

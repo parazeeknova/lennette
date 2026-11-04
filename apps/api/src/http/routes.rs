@@ -66,7 +66,7 @@ pub fn router(state: AppState) -> Router {
         .layer(ServiceBuilder::new().layer(tower::limit::ConcurrencyLimitLayer::new(64))
             .layer(SetRequestIdLayer::new(header::HeaderName::from_static("x-request-id"),MakeRequestUuid))
             .layer(SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION,header::COOKIE]))
-            .layer(TraceLayer::new_for_http().on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)).make_span_with(|request:&axum::http::Request<axum::body::Body>|tracing::info_span!("http_request",method=%request.method(),path=request.uri().path())))
+            .layer(TraceLayer::new_for_http().on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)).make_span_with(|request:&axum::http::Request<axum::body::Body>|tracing::info_span!("http_request",otel.kind="server",method=%request.method(),path=request.uri().path())))
             .layer(middleware::from_fn(crate::telemetry::context))
             .layer(PropagateRequestIdLayer::new(header::HeaderName::from_static("x-request-id")))
             .layer(CorsLayer::new().allow_credentials(true).allow_origin(state.config.website_url.origin().ascii_serialization().parse::<HeaderValue>().expect("validated website origin")).allow_headers([header::AUTHORIZATION,header::CONTENT_TYPE,header::HeaderName::from_static("x-delete-confirmation")]).allow_methods([axum::http::Method::GET,axum::http::Method::POST,axum::http::Method::DELETE])))

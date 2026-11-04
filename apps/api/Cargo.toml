@@ -28,10 +28,11 @@ validator = { version = "0.21", features = ["derive"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-opentelemetry = "0.34"
+opentelemetry-appender-tracing = "0.33"
 opentelemetry = "0.33"
 opentelemetry_sdk = "0.33"
 opentelemetry-http = "0.33"
-opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs", "http-proto", "reqwest-blocking-client"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 rand.workspace = true

@@ -8,6 +8,9 @@ async fn main() -> anyhow::Result<()> {
     // Explicit migration command allows a single release job before replicas start.
     if std::env::args().any(|s| s == "migrate") {
         Migrator::up(&state.db, None).await?;
+        if let Some(telemetry) = telemetry {
+            telemetry.shutdown()?;
+        }
         return Ok(());
     }
     let listener = tokio::net::TcpListener::bind(state.config.bind).await?;
@@ -15,6 +18,7 @@ async fn main() -> anyhow::Result<()> {
     let shutdown = state.shutdown.clone();
     lennette_server::storage::cleanup::start(state.clone());
     lennette_server::http::events::start(state.clone());
+    lennette_server::runtime::infrastructure_metrics::start(state.clone());
     axum::serve(
         listener,
         lennette_server::routes::router(state)

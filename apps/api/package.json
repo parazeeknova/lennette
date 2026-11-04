@@ -1,0 +1,13 @@
+{
+  "name": "@lennette/api",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "cargo run -p lennette-server",
+    "build": "cargo build -p lennette-server --release",
+    "typecheck": "cargo check -p lennette-server --all-targets",
+    "lint": "cargo clippy -p lennette-server --all-targets -- -D warnings",
+    "test": "cargo test -p lennette-server",
+    "migrate": "cargo run -p lennette-server -- migrate"
+  }
+}

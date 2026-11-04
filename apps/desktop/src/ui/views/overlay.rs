@@ -518,6 +518,8 @@ pub struct Overlay {
     speech_ready: bool,
     refreshed_at: std::time::Instant,
     dock_expanded: bool,
+    dock_hovered: bool,
+    dock_collapse: Option<gpui::Task<()>>,
     dock_alignment: f32,
     dock_motion: crate::ui::widgets::motion::Transition,
     composer_motion: crate::ui::widgets::motion::Transition,
@@ -754,6 +756,8 @@ impl Overlay {
             speech_ready: false,
             refreshed_at: std::time::Instant::now() - std::time::Duration::from_secs(2),
             dock_expanded: true,
+            dock_hovered: false,
+            dock_collapse: None,
             dock_alignment: 0.0,
             dock_motion: crate::ui::widgets::motion::Transition::new(0.0),
             composer_motion: crate::ui::widgets::motion::Transition::new(1.0),
@@ -878,7 +882,8 @@ impl Overlay {
             };
             self.mode = Mode::Listen;
             self.close_pill_menus();
-            self.set_dock_expanded(false);
+            self.set_dock_expanded(true);
+            self.schedule_dock_collapse(std::time::Duration::from_millis(1400), cx);
             self.spawn_transcription(cx);
         } else {
             self.session = None;
@@ -955,6 +960,10 @@ impl Overlay {
                             if !overlay.is_listening() { overlay.stop_listening(); }
                         }
                         overlay.live_connected = !overlay.transcription_detached && overlay.session.is_some();
+                        if overlay.live_connected {
+                            overlay.set_dock_expanded(true);
+                            overlay.schedule_dock_collapse(std::time::Duration::from_millis(1400), cx);
+                        }
                         cx.notify();
                     })
                     .ok();
@@ -2338,22 +2347,38 @@ impl Overlay {
 
     // This controls only the header's alignment within the existing window.
     fn set_dock_expanded(&mut self, expanded: bool) {
+        if expanded {
+            self.dock_collapse = None;
+        }
         if self.dock_expanded != expanded {
             self.dock_expanded = expanded;
         }
     }
 
+    fn schedule_dock_collapse(&mut self, delay: std::time::Duration, cx: &mut Context<Self>) {
+        self.dock_collapse = None;
+        self.dock_collapse = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update(cx, |this, cx| {
+                this.dock_collapse = None;
+                if this.is_listening() && !this.dock_hovered && !this.transparent_menu_open() {
+                    this.set_dock_expanded(false);
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
+    }
+
     fn dock_hover(&mut self, hovered: bool, cx: &mut Context<Self>) {
-        if self.app_menu_open
-            || self.dialog_open
-            || self.model_menu_open
-            || self.prompt_menu_open
-            || self.profile_menu_open
-            || self.context_menu_open
-        {
-            return;
+        self.dock_hovered = hovered;
+        if hovered || !self.is_listening() {
+            self.set_dock_expanded(true);
+        } else {
+            // Crossing child hitboxes or moving toward Stop must not trigger
+            // a collapse/expand loop. Re-entry cancels this pending task.
+            self.schedule_dock_collapse(std::time::Duration::from_millis(800), cx);
         }
-        self.set_dock_expanded(hovered || !self.is_listening());
         cx.notify();
     }
 
@@ -5577,11 +5602,9 @@ impl Render for Overlay {
         let dialog = self.render_dialog(window, cx);
         let now = std::time::Instant::now();
         let reduced = self.runtime_settings.reduce_motion;
-        let (alignment, dock_active) = self.dock_motion.step(
-            f32::from(self.is_listening() && !self.dock_expanded),
-            reduced,
-            now,
-        );
+        let (alignment, dock_active) =
+            self.dock_motion
+                .step(f32::from(self.is_listening()), reduced, now);
         self.dock_alignment = alignment;
         let (composer_progress, composer_active) = self.composer_motion.step(
             f32::from(self.bottom_mode == BottomMode::Full),

@@ -693,7 +693,7 @@ impl LiveTranscriber {
             ),
         )
         .await
-        .map_err(|_| SttError::Socket("Deepgram connection timed out".into()))?
+        .map_err(|_| SttError::Socket("Speech connection timed out".into()))?
         .map_err(|e| SttError::Socket(e.to_string()))?;
         let (mut sink, mut source) = socket.split();
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<i16>>(64);
@@ -729,7 +729,7 @@ impl LiveTranscriber {
                             send_live(&mut sink, Message::Text(json!({"type":"KeepAlive"}).to_string().into())).await?;
                         }
                         _ = tokio::time::sleep_until(deadline), if closing => {
-                            return Err("Deepgram did not finish the last words before the close timeout".into());
+                            return Err("The speech service did not finish the last words before the close timeout".into());
                         }
                         message = source.next() => {
                             match message {
@@ -744,7 +744,7 @@ impl LiveTranscriber {
                                     }
                                 }
                                 Some(Ok(Message::Close(_))) | None => {
-                                    if !closing { return Err("Deepgram disconnected; recording stopped. Start again to reconnect.".into()); }
+                                    if !closing { return Err("The speech connection closed; recording stopped. Start again to reconnect.".into()); }
                                     break;
                                 }
                                 Some(Err(error)) => return Err(error.to_string()),

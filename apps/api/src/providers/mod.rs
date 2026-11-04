@@ -307,7 +307,14 @@ pub async fn speech(
         .await;
     let (upstream, _) = match upstream {
         Ok(u) => u,
-        Err(_) => {
+        Err(error) => {
+            let status = match &error {
+                tokio_tungstenite::tungstenite::Error::Http(response) => {
+                    Some(response.status().as_u16())
+                }
+                _ => None,
+            };
+            tracing::warn!(status, "Managed speech upstream connection failed");
             billing::settle(&state, reservation, 0).await?;
             let _: std::result::Result<(), _> = state.redis.del(&key).await;
             return Err(ApiError::Unavailable);
@@ -318,6 +325,24 @@ pub async fn speech(
         let _:std::result::Result<i64,_>=state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",vec![key],vec![lease]).await;
     }))
 }
+/// Only Deepgram's documented client controls pass through the managed proxy.
+/// Canonicalize them rather than forwarding arbitrary client JSON upstream.
+fn speech_control(text: &str) -> Option<&'static str> {
+    if text.len() > 128 {
+        return None;
+    }
+    let value: Value = serde_json::from_str(text).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    match object.get("type")?.as_str()? {
+        "KeepAlive" => Some(r#"{"type":"KeepAlive"}"#),
+        "CloseStream" => Some(r#"{"type":"CloseStream"}"#),
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn pipe_speech(
     state: &AppState,
@@ -335,6 +360,7 @@ async fn pipe_speech(
     interval.tick().await;
     let mut bytes = 0u64;
     let mut chunk_bytes = 0u64;
+    let mut control_frames = 0u64;
     let started = tokio::time::Instant::now();
     let mut chunk_started = tokio::time::Instant::now();
     loop {
@@ -358,7 +384,12 @@ async fn pipe_speech(
                     if data.len()%4!=0 || bytes>(started.elapsed().as_secs()+1)*64000{break}
                     if upstream.send(UpstreamMessage::Binary(data)).await.is_err(){break}
                 },
-                Some(Ok(Message::Text(text))) if text=="{\"type\":\"CloseStream\"}"=>{upstream.send(UpstreamMessage::Text(text.to_string().into())).await.ok();},
+                Some(Ok(Message::Text(text)))=>{
+                    let Some(control) = speech_control(&text) else { break };
+                    control_frames += 1;
+                    if control_frames > (started.elapsed().as_secs() + 1) * 4 { break }
+                    if upstream.send(UpstreamMessage::Text(control.into())).await.is_err(){break}
+                },
                 Some(Ok(Message::Ping(data)))=>{ws.send(Message::Pong(data)).await.ok();},
                 Some(Ok(Message::Pong(_)))=>{},
                 _=>break,
@@ -391,6 +422,26 @@ use sea_orm::EntityTrait;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speech_controls_allow_keepalive_and_close_without_arbitrary_payloads() {
+        assert_eq!(
+            speech_control(r#"{ "type": "KeepAlive" }"#),
+            Some(r#"{"type":"KeepAlive"}"#)
+        );
+        assert_eq!(
+            speech_control(r#"{"type":"CloseStream"}"#),
+            Some(r#"{"type":"CloseStream"}"#)
+        );
+        for value in [
+            r#"{"type":"KeepAlive","extra":true}"#,
+            r#"{"type":"Results"}"#,
+            "null",
+            "invalid",
+        ] {
+            assert_eq!(speech_control(value), None);
+        }
+    }
+
     #[test]
     fn proxy_rejects_roles_urls_and_unbounded_context() {
         assert!(

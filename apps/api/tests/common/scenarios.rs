@@ -610,6 +610,7 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
         ws.on_upgrade(|mut socket|async move{
             while let Some(Ok(message))=socket.recv().await{match message{
                 Message::Binary(_)=>{socket.send(Message::Text(json!({"type":"Results","channel_index":[0,2],"is_final":true,"speech_final":true,"channel":{"alternatives":[{"transcript":"Live meeting words","words":[]}]}}).to_string().into())).await.ok();},
+                Message::Text(text) if text==r#"{"type":"KeepAlive"}"# => { socket.send(Message::Text(json!({"type":"Metadata","keepalive_received":true}).to_string().into())).await.unwrap(); },
                 Message::Close(_)=>break,_=>{},
             }}
         })
@@ -673,6 +674,15 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
     let (mut desktop, _) = tokio_tungstenite::connect_async(speech_request)
         .await
         .unwrap();
+    // The desktop emits this every three seconds, including before speech.
+    // The proxy must forward it rather than closing the paid session.
+    desktop
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            r#"{"type":"KeepAlive"}"#.into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(next_json(&mut desktop).await["keepalive_received"], true);
     desktop
         .send(tokio_tungstenite::tungstenite::Message::Binary(
             vec![0; 3200].into(),

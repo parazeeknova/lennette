@@ -142,8 +142,7 @@ pub fn bind(db: &Connection, account: Uuid, import: bool) -> Result<()> {
     tx.commit()
 }
 fn cloud_id(account: Uuid, table: &str, id: &str) -> Uuid {
-    Uuid::parse_str(id)
-        .unwrap_or_else(|_| Uuid::new_v5(&account, format!("{table}:{id}").as_bytes()))
+    lennette_protocol::sync_record_id(account, table, id)
 }
 #[derive(Clone)]
 pub struct Pending {
@@ -475,6 +474,61 @@ pub fn resolve_conflicts(db: &Connection, keep_local: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn one_to_one_children_never_reuse_parent_cloud_ids_or_revisions() {
+        let db = crate::db::Database::in_memory().unwrap();
+        let c = db.connection();
+        let account = Uuid::new_v4();
+        bind(c, account, false).unwrap();
+        let conversation = crate::db::conversations::create(c, "Conversation", 1).unwrap();
+        c.execute(
+            "INSERT INTO conversation_state(conversation_id,context_json) VALUES(?1,'{}')",
+            [&conversation],
+        )
+        .unwrap();
+        let meeting = crate::db::meetings::start(c, "Meeting", "", "en").unwrap();
+        crate::db::meetings::begin_recap(c, &meeting).unwrap();
+        let queued = pending(c, account).unwrap();
+        let parent = queued.iter().find(|p| p.table == "conversations").unwrap();
+        let context = queued
+            .iter()
+            .find(|p| p.table == "conversation_state")
+            .unwrap();
+        let meeting_parent = queued.iter().find(|p| p.table == "meetings").unwrap();
+        let recap = queued.iter().find(|p| p.table == "meeting_recaps").unwrap();
+        assert_eq!(parent.mutation.id.to_string(), conversation);
+        assert_eq!(meeting_parent.mutation.id.to_string(), meeting);
+        assert_ne!(parent.mutation.id, context.mutation.id);
+        assert_ne!(meeting_parent.mutation.id, recap.mutation.id);
+        assert_ne!(
+            cloud_id(account, "meeting_sentiment", &meeting),
+            meeting_parent.mutation.id
+        );
+        let ack = Change {
+            sequence: 1,
+            id: parent.mutation.id,
+            kind: RecordKind::Conversation,
+            revision: 7,
+            deleted: false,
+            data: parent.mutation.data.clone(),
+            device_id: Uuid::new_v4(),
+        };
+        acknowledge(c, parent, &ack).unwrap();
+        let queued = pending(c, account).unwrap();
+        assert_eq!(
+            queued
+                .iter()
+                .find(|p| p.table == "conversation_state")
+                .unwrap()
+                .mutation
+                .base_revision,
+            0,
+            "A child's revision must never be borrowed from the parent"
+        );
+        assert_eq!(context.mutation.data["conversation_id"], conversation);
+        assert_eq!(recap.mutation.data["meeting_id"], meeting);
+    }
+
     #[test]
     fn offline_writes_capture_after_consent_and_credentials_stay_local() {
         let db = crate::db::Database::in_memory().unwrap();

@@ -576,6 +576,87 @@ async fn remote_device_revocation_notifies_sync_socket_immediately() {
     cleanup(state, account).await;
 }
 
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn one_to_one_desktop_records_sync_alongside_their_parents_without_conflict() {
+    let (state, app, account, tokens) = fixture().await;
+    subscribe(&state, account).await;
+    let conversation = Uuid::new_v4();
+    let meeting = Uuid::new_v4();
+    let child = |table: &str, parent: Uuid| {
+        lennette_protocol::sync_record_id(account, table, &parent.to_string())
+    };
+    let rows = [
+        (
+            conversation,
+            "conversation",
+            json!({"_table":"conversations","id":conversation,"title":"Meeting chat"}),
+        ),
+        (
+            meeting,
+            "meeting",
+            json!({"_table":"meetings","id":meeting,"title":"Meeting"}),
+        ),
+        (
+            child("conversation_state", conversation),
+            "context",
+            json!({"_table":"conversation_state","conversation_id":conversation,"context_json":"{}"}),
+        ),
+        (
+            child("meeting_recaps", meeting),
+            "recap",
+            json!({"_table":"meeting_recaps","meeting_id":meeting,"status":"pending"}),
+        ),
+        (
+            child("meeting_sentiment", meeting),
+            "analysis",
+            json!({"_table":"meeting_sentiment","meeting_id":meeting}),
+        ),
+    ];
+    let mutations:Vec<Value> = rows.iter().map(|(id,kind,data)| json!({"id":id,"mutation_id":Uuid::new_v4(),"kind":kind,"base_revision":0,"deleted":false,"data":data})).collect();
+    let body = json!({"mutations":mutations});
+    let (status, ack) = request(
+        &app,
+        "POST",
+        "/v1/sync/push",
+        Some(&tokens.access_token),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ack}");
+    assert_eq!(ack.as_array().unwrap().len(), 5);
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            "/v1/sync/push",
+            Some(&tokens.access_token),
+            body
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let (status, page) = request(
+        &app,
+        "GET",
+        "/v1/sync/pull?after=0",
+        Some(&tokens.access_token),
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page["changes"].as_array().unwrap().len(), 5);
+    assert_eq!(
+        auth::authenticate(&state, &tokens.access_token)
+            .await
+            .unwrap()
+            .account_id,
+        account
+    );
+    cleanup(state, account).await;
+}
+
 async fn next_json(
     socket: &mut tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,

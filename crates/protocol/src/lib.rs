@@ -4,6 +4,20 @@ use serde_json::Value;
 use uuid::Uuid;
 use validator::Validate;
 
+/// Parent UUIDs remain stable for speech/chat ownership and foreign references.
+/// One-to-one children use that UUID as a local key, but need independent cloud
+/// identities because cloud records share one (account, id) primary key.
+pub fn sync_record_id(account: Uuid, table: &str, local_id: &str) -> Uuid {
+    if !matches!(
+        table,
+        "conversation_state" | "meeting_recaps" | "meeting_sentiment"
+    ) && let Ok(id) = Uuid::parse_str(local_id)
+    {
+        return id;
+    }
+    Uuid::new_v5(&account, format!("{table}:{local_id}").as_bytes())
+}
+
 pub const API_VERSION: u16 = 1;
 pub const MAX_RECORD_BYTES: usize = 256 * 1024;
 pub const MAX_BATCH: usize = 100;

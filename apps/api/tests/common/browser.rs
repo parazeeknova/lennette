@@ -80,6 +80,46 @@ async fn browser_cookie(state: &AppState, tokens: &lennette_protocol::Tokens) ->
 
 #[tokio::test]
 #[ignore = "requires local Postgres and Redis"]
+async fn account_stream_leases_release_on_disconnect_and_allow_three_tabs() {
+    use futures_util::StreamExt;
+    let (state, app, account, tokens) = fixture().await;
+    let (cookie, session) = browser_cookie(&state, &tokens).await;
+    let mut streams = Vec::new();
+    for _ in 0..3 {
+        let response = call(&app, "GET", "/v1/account/events", Some(&cookie), None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut stream = response.into_body().into_data_stream();
+        assert!(stream.next().await.is_some());
+        streams.push(stream);
+    }
+    assert_eq!(
+        call(&app, "GET", "/v1/account/events", Some(&cookie), None)
+            .await
+            .status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    drop(streams.pop());
+    let key = format!("dashboard-streams:{session}");
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let count: i64 = state.redis.zcard(&key).await.unwrap();
+            if count == 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let reconnected = call(&app, "GET", "/v1/account/events", Some(&cookie), None).await;
+    assert_eq!(reconnected.status(), StatusCode::OK);
+    drop(reconnected);
+    drop(streams);
+    cleanup(state, account).await;
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
 async fn provider_linking_preserves_account_and_rejects_conflicts_csrf_and_stale_sessions() {
     use lennette_server::entities::{identities, sessions};
     let (original, _, account, tokens) = fixture().await;

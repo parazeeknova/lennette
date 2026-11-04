@@ -17,6 +17,24 @@ use secrecy::ExposeSecret;
 use std::{convert::Infallible, time::Duration};
 use uuid::Uuid;
 
+struct StreamLease {
+    redis: Client,
+    key: String,
+    token: String,
+}
+impl Drop for StreamLease {
+    fn drop(&mut self) {
+        let redis = self.redis.clone();
+        let key = self.key.clone();
+        let token = self.token.clone();
+        // Response bodies are dropped on navigation/disconnect, without polling
+        // the generator to completion. Release capacity on that path too.
+        tokio::spawn(async move {
+            let _: std::result::Result<i64, _> = redis.zrem(key, token).await;
+        });
+    }
+}
+
 pub fn start(state: AppState) {
     tokio::spawn(async move {
         loop {
@@ -49,24 +67,22 @@ pub async fn stream(
     Extension(p): Extension<Principal>,
     headers: HeaderMap,
 ) -> Result<Sse<impl futures_util::Stream<Item = std::result::Result<Event, Infallible>>>> {
-    // A per-session lease prevents unbounded long-lived HTTP connections.
-    let key = format!("dashboard-stream:{}", p.session_id);
+    // Three tabs per browser session, with expiring cross-replica leases.
+    let key = format!("dashboard-streams:{}", p.session_id);
     let lease = auth::random_token();
-    let acquired: Option<String> = state
-        .redis
-        .set(
-            &key,
-            &lease,
-            Some(Expiration::EX(45)),
-            Some(SetOptions::NX),
-            false,
-        )
-        .await?;
-    if acquired.is_none() {
+    let now = chrono::Utc::now().timestamp();
+    let acquired: i64 = state.redis.eval("redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',ARGV[1]); if redis.call('ZCARD',KEYS[1])>=3 then return 0 end; redis.call('ZADD',KEYS[1],ARGV[2],ARGV[3]); redis.call('EXPIRE',KEYS[1],45); return 1", vec![key.clone()], vec![now.to_string(),(now+45).to_string(),lease.clone()]).await?;
+    if acquired == 0 {
         return Err(ApiError::RateLimited);
     }
+    let guard = StreamLease {
+        redis: state.redis.clone(),
+        key: key.clone(),
+        token: lease.clone(),
+    };
     let mut receiver = state.events.subscribe();
     let stream = async_stream::stream! {
+        let _guard = guard;
         yield Ok(Event::default().event("changed").data("connected"));
         let mut timer = tokio::time::interval(Duration::from_secs(15));
         loop {
@@ -76,7 +92,7 @@ pub async fn stream(
                     if auth::browser::authenticate_cookie(&state,&headers,false).await.is_err() {
                         yield Ok(Event::default().event("expired").data("sign_in_required")); break;
                     }
-                    let renewed: std::result::Result<i64,_> = state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],45) else return 0 end",vec![key.clone()],vec![lease.clone()]).await;
+                    let renewed: std::result::Result<i64,_> = state.redis.eval("if redis.call('ZSCORE',KEYS[1],ARGV[1]) then redis.call('ZADD',KEYS[1],ARGV[2],ARGV[1]); redis.call('EXPIRE',KEYS[1],45); return 1 else return 0 end",vec![key.clone()],vec![lease.clone(),(chrono::Utc::now().timestamp()+45).to_string()]).await;
                     if !matches!(renewed,Ok(1)) { break; }
                 }
                 event = receiver.recv() => {
@@ -89,7 +105,6 @@ pub async fn stream(
                 }
             }
         }
-        let _: std::result::Result<i64,_> = state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",vec![key],vec![lease]).await;
     };
     Ok(Sse::new(stream).keep_alive(KeepAlive::default().interval(Duration::from_secs(10))))
 }

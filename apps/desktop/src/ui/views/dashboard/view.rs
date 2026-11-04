@@ -2616,6 +2616,7 @@ impl Render for DashboardView {
             let search = cx.new(|cx| {
                 let mut editor = crate::ui::widgets::editor::Editor::new("", self.theme, cx);
                 editor.compact = true;
+                editor.search = true;
                 editor.placeholder = "Search all settings…";
                 editor
             });

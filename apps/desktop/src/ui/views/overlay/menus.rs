@@ -46,8 +46,15 @@ impl Overlay {
                     )
                     .child(
                         self.menu_row("refresh-models", false)
-                            .w(px(28.0))
-                            .h(scaled(28.0))
+                            .relative()
+                            .size(scaled(crate::ui::widgets::editor::DENSE_HEIGHT))
+                            .flex_shrink_0()
+                            .rounded(px(8.0))
+                            .bg(crate::ui::widgets::blur::tint(
+                                theme,
+                                crate::ui::widgets::blur::Surface::Input,
+                            ))
+                            .child(crate::ui::widgets::material::dual_edge(theme, 8.0))
                             .px(px(0.0))
                             .justify_center()
                             .opacity(if self.catalog_loading { 0.45 } else { 1.0 })
@@ -250,7 +257,11 @@ impl Overlay {
                     .snap_to_window_with_margin(px(8.0))
                     .child(
                         div()
-                            .w(px(if self.model_menu_open { 310.0 } else { 190.0 }))
+                            .w(px(if self.model_menu_open || self.prompt_menu_open {
+                                310.0
+                            } else {
+                                190.0
+                            }))
                             .child(crate::ui::widgets::motion::reveal(
                                 menu,
                                 (
@@ -294,8 +305,20 @@ impl Overlay {
         index: usize,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let (icon, description) = mode_presentation(&name);
         self.menu_row(("prompt-option", index), self.effective_prompt_id() == id)
-            .child(div().flex_1().min_w(px(0.0)).truncate().child(name))
+            .h(scaled(36.0))
+            .child(icons::icon(&self.theme, icon, 16.0))
+            .child(div().w(px(70.0)).flex_shrink_0().truncate().child(name))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .text_size(scaled(10.0))
+                    .text_color(self.theme.muted_foreground)
+                    .child(description),
+            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.active_prompt = id;
                 this.prompt_menu_open = false;
@@ -324,4 +347,16 @@ fn lennette_badge(theme: &Theme) -> gpui::Div {
         .text_size(scaled(8.5))
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .child("LEN")
+}
+
+/// Short, stable descriptions complement both built-in and custom modes.
+pub(super) fn mode_presentation(name: &str) -> (Icon, &'static str) {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "general" => (Icon::Sparkles, "Everyday questions"),
+        "interview" => (Icon::Briefcase, "Confident interview answers"),
+        "coding" => (Icon::Code, "Code and technical problems"),
+        "translate" | "translation" => (Icon::Languages, "Translate between languages"),
+        "meeting" => (Icon::Users, "Contribute to the discussion"),
+        _ => (Icon::SlidersHorizontal, "Your custom instructions"),
+    }
 }

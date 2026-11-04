@@ -8,9 +8,12 @@ use gpui::{
 };
 use std::ops::Range;
 
+pub const DENSE_HEIGHT: f32 = 28.0;
+
 pub struct Editor {
     pub compact: bool,
     pub dense: bool,
+    pub search: bool,
     pub secret: bool,
     pub max_chars: Option<usize>,
     layout: std::rc::Rc<std::cell::RefCell<super::text_input::TextLayout>>,
@@ -42,6 +45,7 @@ impl Editor {
         Self {
             compact: false,
             dense: false,
+            search: false,
             secret: false,
             max_chars: None,
             layout: Default::default(),
@@ -174,7 +178,8 @@ impl Render for Editor {
         let dirty = self.caret_dirty.clone();
         let compact = self.compact;
         let color = self.theme.foreground;
-        let height = if self.dense { 28.0 } else { 38.0 };
+        let search = self.search;
+        let height = if self.dense { DENSE_HEIGHT } else { 38.0 };
         let padding = if self.dense {
             5.0
         } else if self.compact {
@@ -187,7 +192,13 @@ impl Render for Editor {
             .id("multiline-editor")
             .relative()
             .flex()
-            .flex_col()
+            .when(search, |style| {
+                style
+                    .flex_row()
+                    .items_center()
+                    .gap(crate::ui::theme::scaled(8.0))
+            })
+            .when(!search, |style| style.flex_col())
             .w_full()
             .min_h(crate::ui::theme::scaled(if self.compact {
                 height
@@ -205,6 +216,7 @@ impl Render for Editor {
             })
             .overflow_hidden()
             .p(crate::ui::theme::scaled(padding))
+            .when(search, |style| style.px(crate::ui::theme::scaled(10.0)))
             .rounded(px(crate::ui::widgets::window_frame::aligned_radius(
                 if self.dense { 8.0 } else { 12.0 },
                 window.scale_factor(),
@@ -335,11 +347,24 @@ impl Render for Editor {
                 cx.stop_propagation();
                 cx.notify();
             }))
+            .when(search, |style| {
+                style.child(
+                    div().flex_shrink_0().child(crate::ui::icons::icon(
+                        &self.theme,
+                        lucide_icons::Icon::Search,
+                        f32::from(
+                            crate::ui::theme::scaled(if self.dense { 12.0 } else { 14.0 })
+                                .to_pixels(window.rem_size()),
+                        ),
+                    )),
+                )
+            })
             .child(
                 div()
                     .id("editor-text-scroll")
                     .relative()
-                    .w_full()
+                    .when(search, |style| style.flex_1().min_w(px(0.0)))
+                    .when(!search, |style| style.w_full())
                     .min_h(crate::ui::theme::scaled(line_height))
                     .max_h(crate::ui::theme::scaled(if compact {
                         line_height

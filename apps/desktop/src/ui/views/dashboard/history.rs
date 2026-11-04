@@ -86,6 +86,7 @@ impl DashboardView {
         let mut editor = Editor::new(initial, self.theme, cx);
         editor.compact = true;
         editor.max_chars = Some(200);
+        editor.search = true;
         editor.placeholder = [
             "Search conversations and messages…",
             "Search meetings and transcripts…",

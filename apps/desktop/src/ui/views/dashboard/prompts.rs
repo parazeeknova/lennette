@@ -16,6 +16,7 @@ impl DashboardView {
         let search = cx.new(|cx| {
             let mut editor = Editor::new("", self.theme, cx);
             editor.compact = true;
+            editor.search = true;
             editor.placeholder = "Search prompts…";
             editor
         });

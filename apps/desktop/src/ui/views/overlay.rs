@@ -4310,6 +4310,10 @@ impl Overlay {
     }
 
     fn prompt_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let name = self
+            .active_prompt_name()
+            .unwrap_or_else(|| "General".into());
+        let (icon, _) = menus::mode_presentation(&name);
         div()
             .id("prompt-mode")
             .occlude()
@@ -4325,15 +4329,13 @@ impl Overlay {
             .cursor_pointer()
             .text_size(scaled(11.0))
             .text_color(self.theme.foreground)
+            .child(icons::icon(&self.theme, icon, 12.0))
             .child(
                 div()
                     .max_w(px(70.0))
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .child(
-                        self.active_prompt_name()
-                            .unwrap_or_else(|| "General".into()),
-                    ),
+                    .child(name),
             )
             .child(icons::icon(&self.theme, Icon::ChevronDown, 10.0))
             .child(menu_probe(self.prompt_bounds.clone(), cx))
@@ -5492,6 +5494,7 @@ impl Render for Overlay {
                 let mut editor = crate::ui::widgets::editor::Editor::new("", self.theme, cx);
                 editor.compact = true;
                 editor.dense = true;
+                editor.search = true;
                 editor.placeholder = "Search models…";
                 editor
             });

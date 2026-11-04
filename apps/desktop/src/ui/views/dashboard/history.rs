@@ -128,7 +128,7 @@ impl DashboardView {
         div()
             .flex()
             .items_center()
-            .w(self.content_width)
+            .w_full()
             .min_w(px(0.0))
             .flex_shrink_0()
             .gap(px(10.0))

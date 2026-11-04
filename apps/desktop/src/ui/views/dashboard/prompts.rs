@@ -72,7 +72,11 @@ impl DashboardView {
     pub(super) fn prompts_body(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = self.theme;
         let action_tint = theme.primary;
-        let mut body = div().flex().flex_col().gap(px(16.0)).w_full().child(self.page_heading("System prompts", "Reusable instructions for interviews, meetings and other conversations. Select a prompt in the overlay."));
+        let mut body = div().flex().flex_col().gap(px(16.0)).w_full();
+        if self.prompt_edit.is_some() {
+            body =
+                body.child(self.page_heading("System prompts", "Edit your reusable instructions."));
+        }
         if let Some(error) = &self.settings.error {
             body = body.child(crate::ui::controls::warning(&theme, error));
         }
@@ -120,41 +124,46 @@ impl DashboardView {
                 .into_any_element();
         }
         body = body.child(
-            div()
-                .flex()
-                .items_end()
-                .gap(px(12.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .children(self.prompt_search.clone()),
-                )
-                .child(
-                    div()
-                        .id("new-prompt")
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .h(scaled(38.0))
-                        .flex_shrink_0()
-                        .px(px(12.0))
-                        .rounded(px(11.0))
-                        .border_1()
-                        .border_color(Theme::with_alpha(action_tint, 0.16))
-                        .bg(Theme::with_alpha(action_tint, 0.12))
-                        .text_color(action_tint)
-                        .text_size(scaled(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .cursor_pointer()
-                        .hover(|style| style.bg(Theme::with_alpha(action_tint, 0.20)))
-                        .child(icons::icon_colored(action_tint, Icon::Plus, 14.0))
-                        .child("New prompt")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.edit_prompt(None, cx);
-                            cx.notify();
-                        })),
-                ),
+            self.collection_header(
+                "System prompts",
+                "Reusable instructions for your conversations.",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(
+                        div()
+                            .w(px(280.0))
+                            .min_w(px(0.0))
+                            .children(self.prompt_search.clone()),
+                    )
+                    .child(
+                        div()
+                            .id("new-prompt")
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .h(scaled(38.0))
+                            .flex_shrink_0()
+                            .px(px(12.0))
+                            .rounded(px(11.0))
+                            .border_1()
+                            .border_color(Theme::with_alpha(action_tint, 0.16))
+                            .bg(Theme::with_alpha(action_tint, 0.12))
+                            .text_color(action_tint)
+                            .text_size(scaled(12.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .cursor_pointer()
+                            .hover(|style| style.bg(Theme::with_alpha(action_tint, 0.20)))
+                            .child(icons::icon_colored(action_tint, Icon::Plus, 14.0))
+                            .child("New prompt")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.edit_prompt(None, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element(),
+            ),
         );
         let query = self
             .prompt_search

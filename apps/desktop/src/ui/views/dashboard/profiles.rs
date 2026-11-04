@@ -143,11 +143,12 @@ impl DashboardView {
             .flex_col()
             .w_full()
             .min_w(px(0.0))
-            .gap(px(20.0))
-            .child(self.page_heading(
-                "Profiles",
-                "Keep useful background ready for your next conversation.",
-            ));
+            .gap(px(20.0));
+        if self.profile_edit.is_some() {
+            body = body.child(
+                self.page_heading("Profiles", "Edit the context for your next conversation."),
+            );
+        }
         if let Some(error) = &self.settings.error {
             body = body.child(crate::ui::controls::warning(&theme, error));
         }
@@ -238,27 +239,32 @@ impl DashboardView {
             .and_then(|db| store::selected(db.connection()).ok().flatten());
         body = body
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .w_full()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .w(px(360.0))
-                            .max_w_full()
-                            .min_w(px(0.0))
-                            .children(self.profile_search.clone()),
-                    )
-                    .child(primary(
-                        "create-profile",
-                        "New profile",
-                        Icon::Plus,
-                        theme,
-                        cx,
-                        |this, cx, window| this.edit_profile(None, cx, window),
-                    )),
+                self.collection_header(
+                    "Profiles",
+                    "Useful background for your next conversation.",
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .w_full()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .w(px(280.0))
+                                .max_w_full()
+                                .min_w(px(0.0))
+                                .children(self.profile_search.clone()),
+                        )
+                        .child(primary(
+                            "create-profile",
+                            "New profile",
+                            Icon::Plus,
+                            theme,
+                            cx,
+                            |this, cx, window| this.edit_profile(None, cx, window),
+                        ))
+                        .into_any_element(),
+                ),
             )
             .child(
                 div()

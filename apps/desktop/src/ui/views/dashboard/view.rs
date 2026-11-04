@@ -1572,46 +1572,31 @@ impl DashboardView {
         };
         let count = records.len();
         let mut list = div().flex().flex_col().gap(px(10.0)).pb(px(12.0)).child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(px(12.0))
-                .pb(px(8.0))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(5.0))
-                        .child(
-                            div()
-                                .text_size(scaled(20.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child("Conversations"),
-                        )
-                        .child(
-                            div()
-                                .text_size(scaled(12.0))
-                                .text_color(theme.muted_foreground)
-                                .child(format!(
-                                    "{count} saved {}",
-                                    if count == 1 {
-                                        "conversation"
-                                    } else {
-                                        "conversations"
-                                    }
-                                )),
-                        ),
-                )
-                .child(action_button(
-                    "refresh-conversations",
-                    &theme,
-                    "Refresh",
-                    cx,
-                    |this: &mut Self, _, _| this.navigate(super::nav::Route::Conversations),
-                )),
+            self.collection_header(
+                "Conversations",
+                &format!(
+                    "{count} saved {}",
+                    if count == 1 {
+                        "conversation"
+                    } else {
+                        "conversations"
+                    }
+                ),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().w(px(280.0)).child(self.history_search_bar(0, cx)))
+                    .child(action_button(
+                        "refresh-conversations",
+                        &theme,
+                        "Refresh",
+                        cx,
+                        |this: &mut Self, _, _| this.navigate(super::nav::Route::Conversations),
+                    ))
+                    .into_any_element(),
+            ),
         );
-        list = list.child(self.history_search_bar(0, cx));
         if records.is_empty() && !self.history_queries[0].trim().is_empty() {
             return list.child(self.empty_note("No conversations match this search."));
         }
@@ -1743,6 +1728,36 @@ impl DashboardView {
         )
     }
 
+    fn collection_header(
+        &self,
+        title: &str,
+        subtitle: &str,
+        controls: gpui::AnyElement,
+    ) -> gpui::AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .w_full()
+            .gap(px(20.0))
+            .pb(px(8.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .child(self.page_heading(title, subtitle)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .flex_shrink_0()
+                    .child(controls),
+            )
+            .into_any_element()
+    }
+
     fn page_heading(&self, title: &str, subtitle: &str) -> gpui::AnyElement {
         div()
             .flex()
@@ -1767,15 +1782,25 @@ impl DashboardView {
     fn meetings_body(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let theme = self.theme;
         let surfaces = self.surfaces();
-        let mut list = div()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(self.page_heading(
+        let mut list = div().flex().flex_col().gap(px(12.0)).child(
+            self.collection_header(
                 "Meetings",
-                "Search titles and every saved transcript. Up to 200 matches shown.",
-            ))
-            .child(self.history_search_bar(1, cx));
+                "Search your saved meetings and transcripts.",
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().w(px(280.0)).child(self.history_search_bar(1, cx)))
+                    .child(action_button(
+                        "refresh-meetings",
+                        &theme,
+                        "Refresh",
+                        cx,
+                        |this: &mut Self, _, _| this.navigate(super::nav::Route::Meetings),
+                    ))
+                    .into_any_element(),
+            ),
+        );
         let PageData::Meetings(meetings) = self.dashboard.data() else {
             return list
                 .child(self.collection_empty(

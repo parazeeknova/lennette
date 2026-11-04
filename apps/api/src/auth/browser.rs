@@ -31,14 +31,14 @@ fn name(state: &AppState) -> &'static str {
         "lennette-dev"
     }
 }
-fn oauth_name(state: &AppState) -> &'static str {
+pub(super) fn oauth_name(state: &AppState) -> &'static str {
     if state.config.public_url.scheme() == "https" {
         "__Host-lennette-oauth"
     } else {
         "lennette-oauth"
     }
 }
-fn set_cookie(state: &AppState, name: &str, value: &str, seconds: i64) -> String {
+pub(super) fn set_cookie(state: &AppState, name: &str, value: &str, seconds: i64) -> String {
     format!(
         "{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={seconds}{}",
         if state.config.public_url.scheme() == "https" {
@@ -81,6 +81,15 @@ pub async fn begin(
     Path(provider): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    begin_flow(state, provider, headers, None).await
+}
+
+pub(super) async fn begin_flow(
+    state: AppState,
+    provider: String,
+    headers: HeaderMap,
+    link: Option<super::linking::Target>,
+) -> Result<Response> {
     origin(&state, &headers)?;
     let binding = random_token();
     let challenge = digest(&binding);
@@ -95,7 +104,7 @@ pub async fn begin(
             .to_string(),
         code_challenge: challenge.clone(),
     };
-    let Json(result) = super::start(State(state.clone()), Path(provider), Json(request)).await?;
+    let Json(result) = super::start_flow(state.clone(), provider, request, link).await?;
     state
         .redis
         .set::<(), _, _>(

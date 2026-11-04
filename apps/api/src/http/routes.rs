@@ -25,6 +25,7 @@ use tower_http::{
 
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
+        .route("/browser/link/{provider}", post(auth::linking::begin))
         .route("/me", get(me).delete(sync::delete_account))
         .route("/account/events", get(super::events::stream))
         .route("/browser/activity", post(auth::browser::activity))
@@ -95,7 +96,15 @@ async fn me(
         .one(&state.db)
         .await?
         .ok_or(crate::error::ApiError::Unauthorized)?;
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let providers: Vec<String> = crate::entities::identities::Entity::find()
+        .filter(crate::entities::identities::Column::AccountId.eq(a.id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|identity| identity.provider)
+        .collect();
     Ok(Json(
-        json!({"id":a.id,"email":a.email,"name":a.display_name,"device_id":p.device_id}),
+        json!({"id":a.id,"email":a.email,"name":a.display_name,"device_id":p.device_id,"providers":providers}),
     ))
 }

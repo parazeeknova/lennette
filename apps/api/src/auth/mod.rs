@@ -4,6 +4,7 @@ use crate::{
     state::AppState,
 };
 pub mod browser;
+pub mod linking;
 use axum::{
     Extension, Json,
     extract::{Path, Query, State},
@@ -71,6 +72,8 @@ struct Pending {
     request: AuthStart,
     provider: String,
     provider_verifier: String,
+    #[serde(default)]
+    link: Option<linking::Target>,
 }
 #[derive(Serialize, Deserialize)]
 struct Ticket {
@@ -82,6 +85,15 @@ pub async fn start(
     State(state): State<AppState>,
     Path(provider): Path<String>,
     Json(request): Json<AuthStart>,
+) -> Result<Json<Value>> {
+    start_flow(state, provider, request, None).await
+}
+
+async fn start_flow(
+    state: AppState,
+    provider: String,
+    request: AuthStart,
+    link: Option<linking::Target>,
 ) -> Result<Json<Value>> {
     request
         .validate()
@@ -128,6 +140,7 @@ pub async fn start(
         request,
         provider,
         provider_verifier: verifier,
+        link,
     })
     .map_err(anyhow::Error::from)?;
     state
@@ -263,6 +276,17 @@ pub async fn callback(
                 .to_owned(),
         )
     };
+    if let Some(target) = pending.link {
+        return linking::complete(
+            &state,
+            &headers,
+            &pending.request,
+            target,
+            &provider,
+            &subject,
+        )
+        .await;
+    }
     let account_id = find_or_create(&state, &provider, &subject, &email, &display_name).await?;
     if let Some(response) =
         browser::complete(&state, &headers, account_id, &pending.request).await?

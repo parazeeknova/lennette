@@ -28,6 +28,343 @@ async fn call(
         .unwrap()
 }
 
+async fn oauth_flow(
+    app: &Router,
+    path: &str,
+    cookie: Option<&str>,
+    origin: &str,
+    provider: &str,
+) -> (String, String) {
+    let response = call(app, "POST", path, cookie, Some(origin)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let binding = response.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let body: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let url: url::Url = body["authorization_url"].as_str().unwrap().parse().unwrap();
+    let state = url
+        .query_pairs()
+        .find(|(key, _)| key == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    (
+        binding,
+        format!("/v1/auth/{provider}/callback?state={state}&code=mock"),
+    )
+}
+
+async fn browser_cookie(state: &AppState, tokens: &lennette_protocol::Tokens) -> (String, Uuid) {
+    let p = auth::authenticate(state, &tokens.access_token)
+        .await
+        .unwrap();
+    let token = auth::random_token();
+    state
+        .redis
+        .set::<(), _, _>(
+            format!("browser:{}", auth::digest(&token)),
+            json!({"session":p.session_id,"created":Utc::now().timestamp()}).to_string(),
+            Some(Expiration::EX(1800)),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    (format!("lennette-dev={token}"), p.session_id)
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn provider_linking_preserves_account_and_rejects_conflicts_csrf_and_stale_sessions() {
+    use lennette_server::entities::{identities, sessions};
+    let (original, _, account, tokens) = fixture().await;
+    let email = accounts::Entity::find_by_id(account)
+        .one(&original.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .email;
+    let github_subject = (Uuid::new_v4().as_u128() as u64) / 2;
+    let google_subject = Uuid::new_v4().to_string();
+    let google =
+        json!({"sub":google_subject,"email":email,"email_verified":true,"name":"Link test"});
+    let github = json!({"id":github_subject,"name":"Link test"});
+    let emails = json!([{"email":email,"verified":true,"primary":true}]);
+    let mock = Router::new()
+        .route(
+            "/token",
+            post(|| async { Json(json!({"access_token":"mock"})) }),
+        )
+        .route(
+            "/google",
+            get(move || {
+                let value = google.clone();
+                async move { Json(value) }
+            }),
+        )
+        .route(
+            "/github",
+            get(move || {
+                let value = github.clone();
+                async move { Json(value) }
+            }),
+        )
+        .route(
+            "/emails",
+            get(move || {
+                let value = emails.clone();
+                async move { Json(value) }
+            }),
+        );
+    let (base, task) = serve(mock).await;
+    let mut config = original.config.clone();
+    config.google = Some(lennette_server::config::OAuthConfig {
+        client_id: "test".into(),
+        client_secret: "test".to_owned().into(),
+        token_url: format!("{base}/token"),
+        userinfo_url: format!("{base}/google"),
+        emails_url: None,
+    });
+    config.github = Some(lennette_server::config::OAuthConfig {
+        client_id: "test".into(),
+        client_secret: "test".to_owned().into(),
+        token_url: format!("{base}/token"),
+        userinfo_url: format!("{base}/github"),
+        emails_url: Some(format!("{base}/emails")),
+    });
+    let state = configured(&original, config);
+    let app = routes::router(state.clone());
+    let origin = state.config.website_url.origin().ascii_serialization();
+    let (cookie, session) = browser_cookie(&state, &tokens).await;
+    // Equal verified emails alone must not attach an unrelated provider identity.
+    let (binding, callback) =
+        oauth_flow(&app, "/v1/browser/auth/google", None, &origin, "google").await;
+    let response = call(&app, "GET", &callback, Some(&binding), None).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let separate = identities::Entity::find()
+        .filter(identities::Column::Provider.eq("google"))
+        .filter(identities::Column::Subject.eq(&google_subject))
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(separate.account_id, account);
+    accounts::Entity::delete_by_id(separate.account_id)
+        .exec(&state.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        call(&app, "POST", "/v1/browser/link/github", None, Some(&origin))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/browser/link/github",
+            Some(&cookie),
+            Some("https://evil.test")
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, callback) = oauth_flow(
+        &app,
+        "/v1/browser/link/github",
+        Some(&cookie),
+        &origin,
+        "github",
+    )
+    .await;
+    assert_eq!(
+        call(&app, "GET", &callback, Some(&cookie), None)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(
+        identities::Entity::find()
+            .filter(identities::Column::Subject.eq(github_subject.to_string()))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let (binding, callback) = oauth_flow(
+        &app,
+        "/v1/browser/link/github",
+        Some(&cookie),
+        &origin,
+        "github",
+    )
+    .await;
+    let response = call(
+        &app,
+        "GET",
+        &callback,
+        Some(&format!("{cookie}; {binding}")),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert!(
+        response.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .ends_with("?link=connected")
+    );
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &callback,
+            Some(&format!("{cookie}; {binding}")),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    ); // single-use state
+    // Connect the other provider and verify both normal sign-ins use this account.
+    let (binding, callback) = oauth_flow(
+        &app,
+        "/v1/browser/link/google",
+        Some(&cookie),
+        &origin,
+        "google",
+    )
+    .await;
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &callback,
+            Some(&format!("{cookie}; {binding}")),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::SEE_OTHER
+    );
+    for provider in ["google", "github"] {
+        let (binding, callback) = oauth_flow(
+            &app,
+            &format!("/v1/browser/auth/{provider}"),
+            None,
+            &origin,
+            provider,
+        )
+        .await;
+        let response = call(&app, "GET", &callback, Some(&binding), None).await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let signed_cookie = response
+            .headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .find(|value| value.to_str().unwrap().starts_with("lennette-dev="))
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap();
+        let me = call(&app, "GET", "/v1/me", Some(signed_cookie), None).await;
+        let me: Value =
+            serde_json::from_slice(&me.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        assert_eq!(me["id"], account.to_string());
+        assert_eq!(me["providers"].as_array().unwrap().len(), 2);
+    }
+    // Another account cannot steal an identity, even with a verified provider login.
+    let (_, _, other, other_tokens) = fixture().await;
+    let (other_cookie, _) = browser_cookie(&state, &other_tokens).await;
+    let (binding, callback) = oauth_flow(
+        &app,
+        "/v1/browser/link/github",
+        Some(&cookie),
+        &origin,
+        "github",
+    )
+    .await;
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            &callback,
+            Some(&format!("{other_cookie}; {binding}")),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let (binding, callback) = oauth_flow(
+        &app,
+        "/v1/browser/link/github",
+        Some(&other_cookie),
+        &origin,
+        "github",
+    )
+    .await;
+    let response = call(
+        &app,
+        "GET",
+        &callback,
+        Some(&format!("{other_cookie}; {binding}")),
+        None,
+    )
+    .await;
+    assert!(
+        response.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .ends_with("?link=conflict")
+    );
+    assert_eq!(
+        identities::Entity::find()
+            .filter(identities::Column::Subject.eq(github_subject.to_string()))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .account_id,
+        account
+    );
+    let mut row: sessions::ActiveModel = sessions::Entity::find_by_id(session)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .into();
+    row.created_at = Set(Utc::now() - Duration::minutes(11));
+    row.update(&state.db).await.unwrap();
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/v1/browser/link/github",
+            Some(&cookie),
+            Some(&origin)
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    task.abort();
+    accounts::Entity::delete_by_id(other)
+        .exec(&state.db)
+        .await
+        .unwrap();
+    cleanup(original, account).await;
+}
+
 #[tokio::test]
 #[ignore = "requires local Postgres and Redis"]
 async fn auth_abuse_is_limited_by_socket_peer_and_forwarded_headers_are_untrusted() {

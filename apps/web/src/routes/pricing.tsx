@@ -56,9 +56,9 @@ const plans: Plan[] = [
     features: [
       "2,000 model-weighted AI credits per month",
       "Live meeting transcription · allowance being finalized",
-      "Luna, Haiku, DeepSeek Flash and Gemini models",
+      "Fast models for live AI answers",
       "Speaker labels in your transcripts",
-      "1 GB of synced text and attachments · 3 devices",
+      "10 GB of synced text and attachments · 3 devices",
       "AI and transcription API costs included",
     ],
     cta: {
@@ -72,13 +72,13 @@ const plans: Plan[] = [
     price: MANAGED_PLUS_PLAN.price,
     cadence: "per month",
     summary:
-      "More meeting time and AI credits, with premium models for harder questions.",
+      "More meeting time, more AI credits and fast models for live answers.",
     note: "Planned pricing in USD. Managed access is coming soon.",
     features: [
       "6,000 model-weighted AI credits per month",
       "Higher meeting allowance · details being finalized",
-      "Everything in Managed, plus Sonnet and GPT Sol",
-      "5 GB of synced text and attachments · 6 devices",
+      "Fast models with a larger AI allowance",
+      "50 GB of synced text and attachments · 6 devices",
       "Live transcripts and answers across your devices",
       "AI and transcription API costs included",
     ],

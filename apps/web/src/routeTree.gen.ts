@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SplatRouteImport } from './routes/$'
+import { Route as AccountRouteImport } from './routes/account'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as InstallRouteImport } from './routes/install'
 import { Route as PricingRouteImport } from './routes/pricing'
@@ -26,6 +27,11 @@ const IndexRoute = IndexRouteImport.update({
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountRoute = AccountRouteImport.update({
+  id: '/account',
+  path: '/account',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DownloadsRoute = DownloadsRouteImport.update({
@@ -62,6 +68,7 @@ const TutorialRoute = TutorialRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
+  '/account': typeof AccountRoute
   '/downloads': typeof DownloadsRoute
   '/install': typeof InstallRoute
   '/pricing': typeof PricingRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
+  '/account': typeof AccountRoute
   '/downloads': typeof DownloadsRoute
   '/install': typeof InstallRoute
   '/pricing': typeof PricingRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
+  '/account': typeof AccountRoute
   '/downloads': typeof DownloadsRoute
   '/install': typeof InstallRoute
   '/pricing': typeof PricingRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/$'
+    | '/account'
     | '/downloads'
     | '/install'
     | '/pricing'
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/$'
+    | '/account'
     | '/downloads'
     | '/install'
     | '/pricing'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/$'
+    | '/account'
     | '/downloads'
     | '/install'
     | '/pricing'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SplatRoute: typeof SplatRoute
+  AccountRoute: typeof AccountRoute
   DownloadsRoute: typeof DownloadsRoute
   InstallRoute: typeof InstallRoute
   PricingRoute: typeof PricingRoute
@@ -148,6 +161,13 @@ declare module '@tanstack/react-router' {
       path: '/$'
       fullPath: '/$'
       preLoaderRoute: typeof SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account': {
+      id: '/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AccountRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/downloads': {
@@ -198,6 +218,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
+  AccountRoute: AccountRoute,
   DownloadsRoute: DownloadsRoute,
   InstallRoute: InstallRoute,
   PricingRoute: PricingRoute,

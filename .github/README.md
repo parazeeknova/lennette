@@ -18,7 +18,7 @@ The loader reads `.env.development` and the optional root `.env.local` explicitl
 Only `VITE_`-prefixed variables should contain values intended for the browser.
 
 Local Compose contains only PostgreSQL and Redis. Configure the production API,
-secrets, persistent attachment storage, migrations, and ingress in Dokploy;
+secrets, R2 attachment storage, migrations, and ingress in Dokploy;
 `infra/Dockerfile` remains available to build the API image there.
 
 ### What it does

@@ -41,7 +41,7 @@ export const PRICING_FAQS: readonly FaqEntry[] = [
   },
   {
     question: "What will Managed include?",
-    answer: `The planned ${MANAGED_PLAN.price} monthly subscription includes 2,000 model-weighted AI credits and 1 GB of synced storage across three devices. Managed Plus at $40 includes 6,000 credits, a higher meeting allowance, premium models and 5 GB across six devices. Meeting allowances are being finalized before launch. AI credits vary with the model, context length and generated text; follow-ups use the same allowance. You will not need separate provider keys.`,
+    answer: `The planned ${MANAGED_PLAN.price} monthly subscription includes fast models, 2,000 model-weighted AI credits and 10 GB of synced storage across three devices. Managed Plus at $40 includes fast models, 6,000 credits, a higher meeting allowance and 50 GB across six devices. Meeting allowances are being finalized before launch. AI credits vary with the model, context length and generated text; follow-ups use the same allowance. You will not need separate provider keys.`,
   },
   {
     question: "Does my audio stay on my device?",

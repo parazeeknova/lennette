@@ -27,12 +27,13 @@ export const searchResponse = (
   const isServerFunction = new URL(request.url).pathname.startsWith(
     "/_serverFn/"
   );
-  if (!(isError || isServerFunction || noindex)) {
+  const isAccount = new URL(request.url).pathname === "/account";
+  if (!(isError || isServerFunction || noindex || isAccount)) {
     return response;
   }
   const headers = new Headers(response.headers);
   headers.set("X-Robots-Tag", "noindex, follow");
-  if (isError || noindex) {
+  if (isError || noindex || isAccount) {
     headers.set("Cache-Control", "no-store");
   }
   return new Response(response.body, {

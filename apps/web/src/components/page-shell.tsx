@@ -29,6 +29,7 @@ const navLinks = [
   { label: "Tutorial", to: "/tutorial" },
   { label: "Downloads", to: "/downloads" },
   { label: "Pricing", to: "/pricing" },
+  { label: "Account", to: "/account" },
 ] as const;
 
 export const SiteNav = () => {

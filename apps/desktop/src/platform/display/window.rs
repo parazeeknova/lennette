@@ -142,27 +142,10 @@ pub fn set_always_on_top(window: &Window, above: bool) -> Applied {
     }
     #[cfg(windows)]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
         let Some(handle) = win32_window(window) else {
             return Applied::Unsupported;
         };
-        // SAFETY: live native window, no position/size change.
-        if unsafe {
-            SetWindowPos(
-                handle,
-                if above { HWND_TOPMOST } else { HWND_NOTOPMOST },
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
-        } != 0
-        {
-            Applied::Yes
-        } else {
-            Applied::Failed
-        }
+        set_always_on_top_win32(handle, above)
     }
     #[cfg(target_os = "macos")]
     {
@@ -247,46 +230,10 @@ pub fn protect_from_capture(window: &Window) -> Result<(), String> {
 pub fn set_icon_hidden(window: &Window, hidden: bool) -> Applied {
     #[cfg(windows)]
     {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
         let Some(handle) = win32_window(window) else {
             return Applied::Unsupported;
         };
-        unsafe {
-            let style = GetWindowLongPtrW(handle, GWL_EXSTYLE);
-            let desired = if hidden {
-                (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize)
-            } else {
-                (style | WS_EX_APPWINDOW as isize) & !(WS_EX_TOOLWINDOW as isize)
-            };
-            if desired == style {
-                return Applied::Yes;
-            }
-            let visible = IsWindowVisible(handle) != 0;
-            if visible {
-                ShowWindow(handle, SW_HIDE);
-            }
-            SetWindowLongPtrW(handle, GWL_EXSTYLE, desired);
-            SetWindowPos(
-                handle,
-                std::ptr::null_mut(),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-            );
-            // A style/frame refresh can clear DWM state. Restore both policies
-            // before exposing the changed window to the desktop again.
-            configure_win32_frame(handle);
-            if let Err(error) = protect_win32(handle) {
-                tracing::error!(%error, "refusing to expose a window after its icon style changed");
-                return Applied::Failed;
-            }
-            if visible {
-                ShowWindow(handle, SW_SHOWNOACTIVATE);
-            }
-        }
-        Applied::Yes
+        set_icon_hidden_win32(handle, hidden)
     }
     #[cfg(target_os = "linux")]
     {
@@ -373,6 +320,8 @@ fn configure_win32_frame(handle: windows_sys::Win32::Foundation::HWND) {
         if DwmExtendFrameIntoClientArea(handle, &margins) < 0 {
             tracing::warn!("Windows could not clear the native window material");
         }
+        let backdrop: i32 = 1; // DWMSBT_NONE: GPUI owns alpha, including rounded cutouts.
+        let _ = DwmSetWindowAttribute(handle, 38, (&backdrop as *const i32).cast(), 4);
         let _ = DwmSetWindowAttribute(
             handle,
             DWMWA_NCRENDERING_POLICY as u32,
@@ -431,26 +380,10 @@ fn protect_win32(handle: windows_sys::Win32::Foundation::HWND) -> Result<(), Str
 /// Hide/show the native window; GPUI's app-level hide is a no-op on Windows.
 #[cfg(windows)]
 pub fn set_visible(window: &Window, visible: bool) -> Applied {
-    use windows_sys::Win32::UI::WindowsAndMessaging::*;
     let Some(handle) = win32_window(window) else {
         return Applied::Unsupported;
     };
-    // Recheck before every restore as well as initial startup. Never expose a
-    // window if its policy was lost while hidden.
-    if visible && let Err(error) = protect_win32(handle) {
-        tracing::error!(%error, "refusing to restore an unprotected window");
-        return Applied::Failed;
-    }
-    // SAFETY: handle belongs to this live GPUI window. ShowWindow returns its
-    // previous visibility, not success, so check the resulting state explicitly.
-    unsafe {
-        ShowWindow(handle, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
-    }
-    if (unsafe { IsWindowVisible(handle) } != 0) == visible {
-        Applied::Yes
-    } else {
-        Applied::Failed
-    }
+    set_visible_win32(handle, visible)
 }
 
 /// Bring the window to the front.
@@ -529,6 +462,174 @@ pub fn global_shortcuts_supported() -> (bool, &'static str) {
     }
 }
 
+#[cfg(windows)]
+fn set_always_on_top_win32(handle: windows_sys::Win32::Foundation::HWND, above: bool) -> Applied {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    // SAFETY: live native window, no position/size change.
+    if unsafe {
+        SetWindowPos(
+            handle,
+            if above { HWND_TOPMOST } else { HWND_NOTOPMOST },
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    } != 0
+    {
+        Applied::Yes
+    } else {
+        Applied::Failed
+    }
+}
+
+#[cfg(windows)]
+fn set_icon_hidden_win32(handle: windows_sys::Win32::Foundation::HWND, hidden: bool) -> Applied {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    unsafe {
+        let style = GetWindowLongPtrW(handle, GWL_EXSTYLE);
+        let desired = if hidden {
+            (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize)
+        } else {
+            (style | WS_EX_APPWINDOW as isize) & !(WS_EX_TOOLWINDOW as isize)
+        };
+        if desired == style {
+            return Applied::Yes;
+        }
+        let visible = IsWindowVisible(handle) != 0;
+        if visible {
+            ShowWindow(handle, SW_HIDE);
+        }
+        SetWindowLongPtrW(handle, GWL_EXSTYLE, desired);
+        SetWindowPos(
+            handle,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+        // A style/frame refresh can clear DWM state. Restore both policies
+        // before exposing the changed window to the desktop again.
+        configure_win32_frame(handle);
+        if let Err(error) = protect_win32(handle) {
+            tracing::error!(%error, "refusing to expose a window after its icon style changed");
+            return Applied::Failed;
+        }
+        if visible {
+            ShowWindow(handle, SW_SHOWNOACTIVATE);
+        }
+    }
+    Applied::Yes
+}
+
+#[cfg(windows)]
+fn set_visible_win32(handle: windows_sys::Win32::Foundation::HWND, visible: bool) -> Applied {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    // Recheck before every restore as well as initial startup. Never expose a
+    // window if its policy was lost while hidden.
+    if visible && let Err(error) = protect_win32(handle) {
+        tracing::error!(%error, "refusing to restore an unprotected window");
+        return Applied::Failed;
+    }
+    // SAFETY: handle belongs to this live GPUI window. ShowWindow returns its
+    // previous visibility, not success, so check the resulting state explicitly.
+    unsafe {
+        ShowWindow(handle, if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
+    }
+    if (unsafe { IsWindowVisible(handle) } != 0) == visible {
+        Applied::Yes
+    } else {
+        Applied::Failed
+    }
+}
+
+#[cfg(windows)]
+fn queue_native(
+    window: &Window,
+    cx: &gpui::App,
+    job: impl FnOnce(windows_sys::Win32::Foundation::HWND) + 'static,
+) {
+    let Some(handle) = win32_window(window) else {
+        return;
+    };
+    let handle = handle as usize;
+    let identity = window.window_handle();
+    let app = cx.to_async();
+    cx.foreground_executor()
+        .spawn(async move {
+            // The GPUI id includes its generation: a recycled HWND must not
+            // receive a queued action intended for a window that already closed.
+            if !app
+                .update(|cx| cx.windows().contains(&identity))
+                .unwrap_or(false)
+            {
+                return;
+            }
+            let handle = handle as windows_sys::Win32::Foundation::HWND;
+            if unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(handle) } != 0 {
+                job(handle);
+            }
+        })
+        .detach();
+}
+
+/// Runs after GPUI releases its App borrow, before showing a protected window.
+#[cfg(windows)]
+pub fn prepare_native(window: &Window, cx: &gpui::App) {
+    let app = cx.to_async();
+    queue_native(window, cx, move |handle| {
+        configure_win32_frame(handle);
+        if let Err(error) = protect_win32(handle) {
+            tracing::error!(%error, "refusing to show an unprotected window");
+            let _ = app.update(|cx| cx.quit());
+            return;
+        }
+        if !set_icon_hidden_win32(handle, crate::cli::private_overlay_enabled()).is_yes() {
+            let _ = app.update(|cx| cx.quit());
+            return;
+        }
+        if set_visible_win32(handle, true).is_yes() {
+            focus_win32(handle);
+        }
+    });
+}
+
+#[cfg(windows)]
+pub fn queue_style(window: &Window, cx: &gpui::App, above: bool, hidden: bool) {
+    queue_native(window, cx, move |handle| {
+        if !set_always_on_top_win32(handle, above).is_yes() {
+            tracing::warn!("Could not apply always-on-top");
+        }
+        if !set_icon_hidden_win32(handle, hidden).is_yes() {
+            tracing::warn!("Could not apply taskbar visibility");
+        }
+    });
+}
+
+#[cfg(windows)]
+pub fn queue_visibility(window: &Window, cx: &gpui::App, visible: bool, focus: bool) {
+    queue_native(window, cx, move |handle| {
+        if set_visible_win32(handle, visible).is_yes() {
+            if visible && focus {
+                focus_win32(handle);
+            }
+        } else {
+            tracing::warn!(visible, "Could not apply window visibility");
+        }
+    });
+}
+
+#[cfg(windows)]
+fn focus_win32(handle: windows_sys::Win32::Foundation::HWND) {
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(handle);
+        windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus(handle);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,6 +656,26 @@ mod tests {
                 std::ptr::null(),
             );
             assert!(!handle.is_null(), "could not create a test window");
+            // Reproduce the previous full-HWND backdrop, then verify the
+            // shared frame setup removes it without sacrificing capture safety.
+            let backdrop: i32 = 3;
+            let _ = windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+                handle,
+                38,
+                (&backdrop as *const i32).cast(),
+                4,
+            );
+            configure_win32_frame(handle);
+            let mut actual: i32 = 0;
+            let queried = windows_sys::Win32::Graphics::Dwm::DwmGetWindowAttribute(
+                handle,
+                38,
+                (&mut actual as *mut i32).cast(),
+                4,
+            );
+            if queried >= 0 {
+                assert_eq!(actual, 1, "Native backdrop must not override GPUI alpha");
+            }
             let result = protect_win32(handle);
             DestroyWindow(handle);
             result.expect("Windows must enforce exclusion before a release can be published");

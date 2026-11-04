@@ -2666,24 +2666,43 @@ impl Render for DashboardView {
             hidden,
         );
 
-        if self.native_always_on_top != Some(self.settings.settings.always_on_top) {
-            let above = self.settings.settings.always_on_top;
-            window.defer(cx, move |window, _| {
-                crate::platform::window::set_always_on_top(window, above);
-            });
+        #[cfg(windows)]
+        if self.native_always_on_top != Some(self.settings.settings.always_on_top)
+            || self.native_icon_hidden != Some(hidden)
+        {
+            crate::platform::window::queue_style(
+                window,
+                cx,
+                self.settings.settings.always_on_top,
+                hidden,
+            );
             self.native_always_on_top = Some(self.settings.settings.always_on_top);
-        }
-        if self.native_icon_hidden != Some(hidden) {
-            window.defer(cx, move |window, _| {
-                crate::platform::window::set_icon_hidden(window, hidden);
-            });
             self.native_icon_hidden = Some(hidden);
+        }
+        #[cfg(not(windows))]
+        {
+            if self.native_always_on_top != Some(self.settings.settings.always_on_top) {
+                let above = self.settings.settings.always_on_top;
+                window.defer(cx, move |window, _| {
+                    crate::platform::window::set_always_on_top(window, above);
+                });
+                self.native_always_on_top = Some(self.settings.settings.always_on_top);
+            }
+            if self.native_icon_hidden != Some(hidden) {
+                window.defer(cx, move |window, _| {
+                    crate::platform::window::set_icon_hidden(window, hidden);
+                });
+                self.native_icon_hidden = Some(hidden);
+            }
         }
         if self.native_backdrop != Some(backdrop) {
             let theme = self.theme;
+            #[cfg(not(windows))]
             window.defer(cx, move |window, _| {
                 crate::ui::widgets::blur::apply(window, theme, opacity)
             });
+            #[cfg(windows)]
+            crate::ui::widgets::blur::apply(window, theme, opacity);
             self.native_backdrop = Some(backdrop);
         }
         // Text sizes are written in rems, so this one value scales the window.

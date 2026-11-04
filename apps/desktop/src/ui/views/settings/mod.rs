@@ -4,6 +4,7 @@
 //! [`SettingsState`], which persists immediately so a restart never loses a
 //! change.
 
+use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, FontWeight, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px,
@@ -351,7 +352,7 @@ pub fn app_settings(
             ))
             .child(value_chip(theme, &format!("{}%", s.font_scale))),
     ))
-    .child(row(
+    .when(!cfg!(windows), |section| section.child(row(
         theme,
         "Backdrop blur",
         "Frost the desktop behind translucent surfaces. Uses your compositor; disabled at 0% and 100% opacity.",
@@ -359,7 +360,7 @@ pub fn app_settings(
             view.settings_mut().settings.backdrop_blur = !view.settings_mut().settings.backdrop_blur;
             view.save_settings();
         }),
-    ))
+    )))
     .child(row(
         theme,
         "Show borders",

@@ -2221,11 +2221,10 @@ impl Overlay {
             {
                 // The close callback already borrows this window. Use that
                 // handle instead of trying to update the same window again.
-                if crate::platform::window::set_visible(window, false).is_yes() {
-                    self.window_visible = false;
-                    self.cancel_dictation();
-                    cx.notify();
-                }
+                crate::platform::window::queue_visibility(window, cx, false, false);
+                self.window_visible = false;
+                self.cancel_dictation();
+                cx.notify();
             }
             #[cfg(not(windows))]
             self.toggle_window(cx);
@@ -2268,13 +2267,9 @@ impl Overlay {
             {
                 found |= overlay;
                 applied &= handle
-                    .update(cx, |_, window, _| {
-                        let applied =
-                            crate::platform::window::set_visible(window, visible).is_yes();
-                        if applied && visible && overlay {
-                            crate::platform::window::focus(window);
-                        }
-                        applied
+                    .update(cx, |_, window, cx| {
+                        crate::platform::window::queue_visibility(window, cx, visible, overlay);
+                        true
                     })
                     .unwrap_or(false);
             }
@@ -5368,18 +5363,34 @@ impl Render for Overlay {
             hidden,
         );
 
-        if self.native_icon_hidden != Some(hidden) {
-            window.defer(cx, move |window, _| {
-                crate::platform::window::set_icon_hidden(window, hidden);
-            });
+        #[cfg(windows)]
+        if self.native_always_on_top != Some(self.runtime_settings.always_on_top)
+            || self.native_icon_hidden != Some(hidden)
+        {
+            crate::platform::window::queue_style(
+                window,
+                cx,
+                self.runtime_settings.always_on_top,
+                hidden,
+            );
+            self.native_always_on_top = Some(self.runtime_settings.always_on_top);
             self.native_icon_hidden = Some(hidden);
         }
-        if self.native_always_on_top != Some(self.runtime_settings.always_on_top) {
-            let above = self.runtime_settings.always_on_top;
-            window.defer(cx, move |window, _| {
-                crate::platform::window::set_always_on_top(window, above);
-            });
-            self.native_always_on_top = Some(above);
+        #[cfg(not(windows))]
+        {
+            if self.native_icon_hidden != Some(hidden) {
+                window.defer(cx, move |window, _| {
+                    crate::platform::window::set_icon_hidden(window, hidden);
+                });
+                self.native_icon_hidden = Some(hidden);
+            }
+            if self.native_always_on_top != Some(self.runtime_settings.always_on_top) {
+                let above = self.runtime_settings.always_on_top;
+                window.defer(cx, move |window, _| {
+                    crate::platform::window::set_always_on_top(window, above);
+                });
+                self.native_always_on_top = Some(above);
+            }
         }
         if self.native_backdrop != Some(backdrop) {
             let theme = self.theme;
@@ -5388,9 +5399,12 @@ impl Render for Overlay {
             } else {
                 0.0
             };
+            #[cfg(not(windows))]
             window.defer(cx, move |window, _| {
                 crate::ui::widgets::blur::apply(window, theme, opacity)
             });
+            #[cfg(windows)]
+            crate::ui::widgets::blur::apply(window, theme, opacity);
             self.native_backdrop = Some(backdrop);
         }
         // Text sizes are written in rems, so this one value scales the window.

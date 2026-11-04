@@ -1,5 +1,5 @@
-//! Shared frosted-surface recipe. The OS compositor supplies backdrop pixels;
-//! we never capture the screen or blur text/foreground content.
+//! Shared translucent surface tints, with native blur where it preserves alpha.
+//! Windows uses the tint fallback. No screen capture or foreground blurring.
 use crate::ui::theme::Theme;
 use gpui::{Rgba, Window};
 
@@ -39,32 +39,12 @@ pub fn enabled(opacity: f32) -> bool {
 /// retain the tinted fallback rather than pretending a flat fill is blurred.
 pub fn apply(window: &Window, theme: Theme, opacity: f32) {
     #[cfg(windows)]
-    if let Some(handle) = crate::platform::window::win32_window(window) {
-        use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
-        let active = enabled(opacity);
-        let dark: i32 = i32::from(theme.foreground.r >= 0.5);
-        let backdrop: i32 = if active { 3 } else { 1 }; // DWMSBT_TRANSIENTWINDOW / NONE
-        unsafe {
-            let margins = windows_sys::Win32::UI::Controls::MARGINS {
-                cxLeftWidth: if active { -1 } else { 0 },
-                cxRightWidth: if active { -1 } else { 0 },
-                cyTopHeight: if active { -1 } else { 0 },
-                cyBottomHeight: if active { -1 } else { 0 },
-            };
-            let _ =
-                windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea(handle, &margins);
-            let _ = DwmSetWindowAttribute(handle, 20, (&dark as *const i32).cast(), 4);
-            let result = DwmSetWindowAttribute(handle, 38, (&backdrop as *const i32).cast(), 4);
-            if result < 0 {
-                // Windows 10 lacks system-backdrop attributes. GPUI's native
-                // Windows acrylic path is the compatibility fallback.
-                window.set_background_appearance(if active {
-                    gpui::WindowBackgroundAppearance::Blurred
-                } else {
-                    gpui::WindowBackgroundAppearance::Transparent
-                });
-            }
-        }
+    {
+        // DWM acrylic adds an independent full-HWND material. It does not
+        // follow GPUI surface alpha/cutouts, so it breaks the opacity slider.
+        // Windows uses the themed translucent fallback until a region-scoped
+        // compositor material can preserve each surface's shape and opacity.
+        let _ = (window, theme, opacity);
     }
     #[cfg(not(windows))]
     {

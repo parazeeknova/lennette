@@ -14,6 +14,7 @@ const INDEX: &[(Route, &str, &str)] = &[
     ),
     (Route::Settings, "Text size", "font scale readability"),
     (Route::Settings, "Show borders", "outline frame corners"),
+    #[cfg(not(windows))]
     (
         Route::Settings,
         "Backdrop blur",
@@ -210,6 +211,7 @@ mod tests {
             "System Audio",
             keywords("System Audio")
         ));
+        #[cfg(not(windows))]
         assert!(matches(
             "frosted material",
             "Backdrop blur",

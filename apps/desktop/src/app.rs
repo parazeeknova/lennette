@@ -216,9 +216,14 @@ pub fn run() {
                 app_id: Some(crate::identity::APP_ID.into()),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(680.0), px(420.0))),
-                // A transparent window lets the opacity control show the desktop
-                // through the overlay instead of only fading toward black.
-                window_background: gpui::WindowBackgroundAppearance::Transparent,
+                // GPUI's Windows renderer always uses alpha composition. Opaque
+                // here disables the separate native accent material, so rendered
+                // surface alpha (including rounded cutouts) remains in control.
+                window_background: if cfg!(windows) {
+                    gpui::WindowBackgroundAppearance::Opaque
+                } else {
+                    gpui::WindowBackgroundAppearance::Transparent
+                },
                 titlebar: Some(TitlebarOptions {
                     title: Some(crate::identity::NAME.into()),
                     appears_transparent: true,
@@ -309,6 +314,9 @@ pub fn run() {
             let bind_portal = pure_wayland && !crate::features::hyprland::is_hyprland();
             let control_handle = control.ok().map(std::sync::Arc::new);
             cx.open_window(overlay_options, move |window, cx| {
+                #[cfg(windows)]
+                crate::platform::window::prepare_native(window, cx);
+                #[cfg(not(windows))]
                 window.defer(cx, |window, cx| {
                     if let Err(error) = crate::platform::window::protect_from_capture(window) {
                         tracing::error!(%error,"refusing to show an unprotected window");
@@ -340,6 +348,7 @@ pub fn run() {
             })
             .expect("failed to open the overlay window");
 
+            #[cfg(not(windows))]
             cx.activate(true);
             tracing::info!(
                 elapsed_ms = startup.elapsed().as_millis(),
@@ -383,9 +392,8 @@ pub fn open_dashboard_at(
                 .update(cx, |view, window, cx| {
                     view.navigate_to(route);
                     #[cfg(windows)]
-                    if !crate::platform::window::set_visible(window, true).is_yes() {
-                        return;
-                    }
+                    crate::platform::window::queue_visibility(window, cx, true, true);
+                    #[cfg(not(windows))]
                     window.activate_window();
                     cx.notify();
                 })
@@ -400,7 +408,11 @@ pub fn open_dashboard_at(
         app_id: Some(crate::identity::APP_ID.into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(960.0), px(540.0))),
-        window_background: gpui::WindowBackgroundAppearance::Transparent,
+        window_background: if cfg!(windows) {
+            gpui::WindowBackgroundAppearance::Opaque
+        } else {
+            gpui::WindowBackgroundAppearance::Transparent
+        },
         titlebar: Some(TitlebarOptions {
             title: Some("Lennette Dashboard".into()),
             appears_transparent: true,
@@ -411,20 +423,17 @@ pub fn open_dashboard_at(
 
     if let Err(error) = cx.open_window(options, move |window, cx| {
         window.set_window_title("Lennette Dashboard");
-        let protected = crate::platform::window::protect_from_capture(window);
         #[cfg(windows)]
-        if protected.is_ok() {
-            crate::platform::window::set_visible(window, true);
+        crate::platform::window::prepare_native(window, cx);
+        #[cfg(not(windows))]
+        window.defer(cx, |window, cx| {
+            if let Err(error) = crate::platform::window::protect_from_capture(window) {
+                tracing::error!(%error, "refusing to show an unprotected dashboard");
+                cx.quit();
+                return;
+            }
             window.activate_window();
-        }
-        #[cfg(target_os = "macos")]
-        if protected.is_ok() {
-            window.activate_window();
-        }
-        if let Err(error) = protected {
-            tracing::error!(%error, "refusing to show an unprotected dashboard");
-            cx.quit();
-        }
+        });
         // Each window gets its own connection so a slow page never blocks the
         // overlay's writes.
         let title_config = preferred_chat_config(&services);

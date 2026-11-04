@@ -1,13 +1,12 @@
 pub mod auth;
 pub mod billing;
-pub mod config;
-pub mod entities;
-pub mod error;
-pub mod migration;
-pub mod plans;
+pub mod http;
+pub mod persistence;
 pub mod providers;
-mod providers_batch;
-pub mod routes;
-pub mod state;
+pub mod runtime;
 pub mod sync;
-pub mod telemetry;
+// Preserve API paths for the binary, shared tests, and existing callers.
+pub use billing::plans;
+pub use http::{error, routes};
+pub use persistence::{entities, migration};
+pub use runtime::{config, state, telemetry};

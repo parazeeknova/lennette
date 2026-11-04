@@ -33,7 +33,7 @@ impl MigrationTrait for Initial {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared(include_str!("../migrations/001_initial.sql"))
+            .execute_unprepared(include_str!("../../migrations/001_initial.sql"))
             .await?;
         Ok(())
     }

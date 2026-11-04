@@ -1,10 +1,11 @@
+pub mod plans;
 use crate::{
     auth::Principal,
     entities::{
         accounts, billing_holds, reservations, subscriptions, usage_buckets, webhook_events,
     },
     error::{ApiError, Result},
-    plans::{self, Plan},
+    plans::Plan,
     state::AppState,
 };
 use axum::{Extension, Json, body::Bytes, extract::State, http::HeaderMap};

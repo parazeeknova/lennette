@@ -1,4 +1,5 @@
-pub use crate::providers_batch::transcribe;
+mod batch;
+pub use batch::transcribe;
 use crate::{
     auth::{self, Principal},
     billing,

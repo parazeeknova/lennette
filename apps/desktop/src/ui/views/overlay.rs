@@ -5715,27 +5715,21 @@ impl Render for Overlay {
             .overflow_hidden()
             .p(px(1.0))
             .bg(self.surfaces().background());
-        if self.show_empty_wordmark() && !self.transparent_menu_open() {
-            // Decorative, unregistered element: no focus or pointer handlers.
-            // Absolute positioning keeps the wordmark centered in the window
-            // independently of the composer and session-pill heights.
-            root = root.child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        div()
-                            .font_weight(FontWeight::BOLD)
-                            .text_size(px((f32::from(window.viewport_size().width) * 0.115)
-                                .clamp(56.0, 110.0)))
-                            .text_color(Theme::with_alpha(theme.foreground, 0.10))
-                            .child("lennette"),
-                    ),
-            );
-        }
+        let empty = self.show_empty_wordmark();
+        let panel_content = if empty {
+            let wordmark_size = (f32::from(window.viewport_size().width) * 0.16).clamp(88.0, 150.0);
+            div().flex_1().min_h(px(0.0)).w_full().flex().flex_col()
+                .items_center().justify_center().pt(px(64.0)).px(px(24.0)).gap(px(12.0))
+                .child(div().font_weight(FontWeight::BOLD).text_size(px(wordmark_size))
+                    .line_height(px(wordmark_size * 1.05))
+                    .text_color(Theme::with_alpha(theme.foreground, 0.10)).child("lennette"))
+                .child(div().text_size(scaled(11.5)).line_height(scaled(18.0)).text_center()
+                    .text_color(Theme::with_alpha(theme.foreground, 0.45))
+                    .child("Press Start to begin a meeting, or open Dashboard to set up your workspace."))
+                .into_any_element()
+        } else {
+            self.listen_body(cx).into_any_element()
+        };
         root = root.child(
             div()
                 .relative()
@@ -5743,10 +5737,10 @@ impl Render for Overlay {
                 .flex_col()
                 .flex_1()
                 .min_h(px(0.0))
-                .pr(px(43.0))
+                .when(!empty, |style| style.pr(px(43.0)))
                 .overflow_hidden()
                 .when(self.transparent_menu_open(), |style| style.invisible())
-                .child(self.listen_body(cx))
+                .child(panel_content)
                 .child(self.bottom_controls(cx))
                 .with_animation(
                     ("panel-reveal", self.mode as usize),

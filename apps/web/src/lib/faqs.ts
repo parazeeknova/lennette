@@ -35,6 +35,11 @@ export const HOME_FAQS: readonly FaqEntry[] = [
 
 export const PRICING_FAQS: readonly FaqEntry[] = [
   {
+    question: "Are subscription payments refundable?",
+    answer:
+      "Paid subscriptions, renewals and upgrades are non-refundable, including unused time or usage, except where required by law. Cancel before your next renewal to prevent future charges. For duplicate or incorrect charges, contact harsh@itssingularity.com with your payment reference.",
+  },
+  {
     question: "What do I pay for on the free plan?",
     answer:
       "Nothing to Lennette. Add your own AI provider key for answers and a Deepgram key for live transcription. Those providers bill you directly for API usage. You do not need a Lennette account.",

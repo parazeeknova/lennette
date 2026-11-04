@@ -61,6 +61,7 @@ export const TERMS: LegalDocument = {
       id: "refunds",
       title: "Refunds and billing issues",
       paragraphs: [
+        "Paid subscriptions, renewals and plan upgrades are non-refundable, including unused subscription time, AI credits, transcription allowances and storage, except where required by applicable law. Cancel before your next renewal to prevent future charges.",
         "For a refund request, duplicate or incorrect charge, or problem accessing a purchase, contact harsh@itssingularity.com with the account email and payment reference. Do not send full payment-card details. We will review the request with the payment provider under the terms disclosed at checkout and applicable law.",
         "Canceling renewal does not by itself issue a refund for a previous charge. These terms do not limit any mandatory cancellation, refund, or consumer rights you have under applicable law.",
       ],

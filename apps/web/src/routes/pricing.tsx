@@ -214,6 +214,20 @@ const PricingPage = () => {
         ))}
       </div>
 
+      <p className="mt-6 text-sm leading-relaxed text-ink-soft">
+        Paid subscriptions, renewals and upgrades are non-refundable, including
+        unused time or usage, except where required by law. Cancel before your
+        next renewal to prevent future charges. See our{" "}
+        <Link
+          to="/terms"
+          hash="refunds"
+          className="underline underline-offset-4"
+        >
+          refund terms
+        </Link>
+        .
+      </p>
+
       <section className="mt-16">
         <h2 className="font-display text-2xl text-ink">
           Questions about pricing

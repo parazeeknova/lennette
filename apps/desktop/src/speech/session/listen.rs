@@ -123,6 +123,7 @@ pub struct ListenSession {
     started: std::time::Instant,
     sent_samples: usize,
     frames: CaptureFrames,
+    echo: crate::audio::echo::EchoSuppressor,
     last_audio: [std::time::Instant; 2],
     elapsed: Duration,
     output_device: Option<String>,
@@ -185,6 +186,7 @@ impl ListenSession {
                 remote_enabled,
                 ..Default::default()
             },
+            echo: Default::default(),
             last_audio: [std::time::Instant::now(); 2],
             elapsed: Duration::ZERO,
             output_device: config.output_device.clone(),
@@ -195,6 +197,7 @@ impl ListenSession {
     /// Switch call capture without reconnecting or interrupting the microphone.
     pub fn set_system_audio(&mut self, enabled: bool) -> Vec<SessionEvent> {
         if !enabled {
+            self.echo.reset();
             self.frames.set_remote(false);
             self.system.take();
             return vec![SessionEvent::Started {
@@ -287,9 +290,12 @@ impl ListenSession {
             return events;
         }
         while self.sent_samples + FRAME_SAMPLES <= due {
-            let Some(samples) = self.frames.next(false, quiet) else {
+            let Some(mut samples) = self.frames.next(false, quiet) else {
                 break;
             };
+            if self.frames.remote_enabled {
+                self.echo.process(&mut samples);
+            }
             self.sent_samples += samples.len() / 2;
             events.push(SessionEvent::Audio(samples));
         }
@@ -325,7 +331,10 @@ impl ListenSession {
                     "The final audio exceeded the capture buffer.".into(),
                 ));
             }
-            while let Some(samples) = self.frames.next(true, [false; 2]) {
+            while let Some(mut samples) = self.frames.next(true, [false; 2]) {
+                if self.frames.remote_enabled {
+                    self.echo.process(&mut samples);
+                }
                 events.push(SessionEvent::Audio(samples));
             }
             microphone.stop();

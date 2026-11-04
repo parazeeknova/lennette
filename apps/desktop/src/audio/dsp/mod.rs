@@ -3,6 +3,8 @@
 //! Live capture feeds 16 kHz mono f32 samples. Everything that decides *what* to
 //! send is pure and unit-tested here; device I/O lives in [`capture`].
 
+pub mod echo;
+
 use std::io::Cursor;
 
 /// Sample rate used for every encoded chunk and for live streaming.

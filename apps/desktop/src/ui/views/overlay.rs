@@ -4410,7 +4410,7 @@ impl Overlay {
         }
         let material = self.theme.promotion();
         Some(
-            div().w_full().pb(px(12.0)).child(
+            div().w_full().px(px(12.0)).pb(px(12.0)).child(
                 div()
                     .relative()
                     .w_full()

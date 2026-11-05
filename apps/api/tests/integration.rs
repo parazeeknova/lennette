@@ -34,15 +34,42 @@ mod upgrade;
 mod workspace;
 
 async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
+    fixture_in_schema(None).await
+}
+
+async fn storage_fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
+    // Cleanup scans the whole journal. A private schema keeps other fixtures'
+    // workers (which use different object stores) from consuming these jobs.
+    fixture_in_schema(Some(format!("storage_test_{}", Uuid::new_v4().simple()))).await
+}
+
+async fn fixture_in_schema(
+    schema: Option<String>,
+) -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
     static MIGRATION: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    let mut database_url: url::Url = std::env::var("TEST_DATABASE_URL")
+        .unwrap_or("postgres://lennette:local-development-only@127.0.0.1:55432/lennette".into())
+        .parse()
+        .unwrap();
+    if let Some(schema) = &schema {
+        use sea_orm::ConnectionTrait;
+        let db = sea_orm::Database::connect(database_url.as_str())
+            .await
+            .unwrap();
+        db.execute_unprepared(&format!("CREATE SCHEMA {schema}"))
+            .await
+            .unwrap();
+        db.close().await.unwrap();
+        database_url
+            .query_pairs_mut()
+            .append_pair("options", &format!("-csearch_path={schema}"));
+    }
     let empty = || SecretString::from(String::new());
     let mut state = AppState::connect(Config {
         bind: "127.0.0.1:0".parse().unwrap(),
         public_url: "http://127.0.0.1:8090".parse().unwrap(),
         website_url: "https://lennette.itssingularity.com".parse().unwrap(),
-        database_url: SecretString::from(std::env::var("TEST_DATABASE_URL").unwrap_or(
-            "postgres://lennette:local-development-only@127.0.0.1:55432/lennette".into(),
-        )),
+        database_url: SecretString::from(database_url.to_string()),
         database_url_unpooled: std::env::var("TEST_DATABASE_URL_UNPOOLED")
             .ok()
             .map(SecretString::from),
@@ -70,9 +97,13 @@ async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
     .unwrap();
     std::sync::Arc::get_mut(&mut state.0).unwrap().attachments =
         Some(std::sync::Arc::new(object_store::memory::InMemory::new()));
-    MIGRATION
-        .get_or_init(|| async { Migrator::up(&state.db, None).await.unwrap() })
-        .await;
+    if schema.is_some() {
+        Migrator::up(&state.db, None).await.unwrap();
+    } else {
+        MIGRATION
+            .get_or_init(|| async { Migrator::up(&state.db, None).await.unwrap() })
+            .await;
+    }
     let id = Uuid::new_v4();
     accounts::ActiveModel {
         id: Set(id),
@@ -138,6 +169,25 @@ async fn cleanup(state: AppState, id: Uuid) {
         .exec(&state.db)
         .await
         .unwrap();
+    use sea_orm::ConnectionTrait;
+    let schema: String = state
+        .db
+        .query_one_raw(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT current_schema() AS schema",
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "schema")
+        .unwrap();
+    if schema.starts_with("storage_test_") {
+        state
+            .db
+            .execute_unprepared(&format!("DROP SCHEMA {schema} CASCADE"))
+            .await
+            .unwrap();
+    }
     state.redis.quit().await.ok();
     state.db.clone().close().await.ok();
 }

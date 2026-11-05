@@ -16,7 +16,8 @@ export class AccountError extends Error {
 export const accountRequest = async <T>(
   path: string,
   method = "GET",
-  body?: unknown
+  body?: unknown,
+  signal?: AbortSignal
 ): Promise<T> => {
   const response = await fetch(`${API_URL}/v1${path}`, {
     method,
@@ -29,7 +30,9 @@ export const accountRequest = async <T>(
         : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(60_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+      : AbortSignal.timeout(60_000),
   }).catch(() => {
     throw new AccountError(
       "We couldn’t connect to account services. Please try again.",

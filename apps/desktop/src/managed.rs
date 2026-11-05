@@ -20,7 +20,7 @@ pub use attachments::cache_attachment;
 static CLIENT: RwLock<Option<Client>> = RwLock::new(None);
 static DATABASE: OnceLock<PathBuf> = OnceLock::new();
 static STATUS: Mutex<String> = Mutex::new(String::new());
-static MEETING: Mutex<Option<Uuid>> = Mutex::new(None);
+static MEETING: Mutex<Option<(Uuid, f64)>> = Mutex::new(None);
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 static STARTED: OnceLock<()> = OnceLock::new();
 pub fn active() -> Option<Client> {
@@ -307,10 +307,13 @@ pub async fn flush() -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?
 }
-pub fn set_meeting(id: Option<&str>) {
-    *MEETING.lock().unwrap() = id.and_then(|s| s.parse().ok());
+pub fn set_meeting(id: Option<&str>, offset: f64) {
+    *MEETING.lock().unwrap() = id.and_then(|s| s.parse().ok()).map(|id| (id, offset));
 }
 pub fn meeting() -> Option<Uuid> {
+    MEETING.lock().unwrap().map(|(id, _)| id)
+}
+pub fn meeting_context() -> Option<(Uuid, f64)> {
     *MEETING.lock().unwrap()
 }
 pub fn chat_config() -> Option<crate::ai::providers::ProviderConfig> {

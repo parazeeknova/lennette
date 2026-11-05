@@ -925,7 +925,7 @@ impl Overlay {
 
     /// Stream raw two-channel PCM as capture runs; never wait for a local utterance.
     fn spawn_transcription(&mut self, cx: &mut Context<Self>) {
-        crate::managed::set_meeting(self.meeting_id.as_deref());
+        crate::managed::set_meeting(self.meeting_id.as_deref(), self.meeting_offset);
         let Some(config) = self.speech.clone() else {
             return;
         };
@@ -1231,6 +1231,7 @@ impl Overlay {
     /// Stop the session. Returns the meeting that just ended, when one did,
     /// so the caller can have it named once its words are final.
     pub fn stop_listening(&mut self) -> Option<String> {
+        crate::managed::set_meeting(None, 0.0);
         self.pending_capture = None;
         if self.automatic_inflight {
             self.interrupt_response();
@@ -1451,6 +1452,7 @@ impl Overlay {
         );
 
         let context = crate::features::chat_engine::TurnContext {
+            conversation_id: self.chat.conversation_id().and_then(|id| id.parse().ok()),
             system: Some(self.selected_system_prompt()),
             images,
         };
@@ -2829,6 +2831,7 @@ impl Overlay {
             settings.smart_follow_ups_prompt
         )));
         let context = crate::features::chat_engine::TurnContext {
+            conversation_id: None,
             system: Some(self.selected_system_prompt()),
             images: Vec::new(),
         };
@@ -2918,6 +2921,7 @@ impl Overlay {
         let cancel = std::sync::Arc::new(tokio::sync::watch::channel(false).1);
         self.title_task = Some(cx.spawn(async move |_, cx| {
             let context = crate::features::chat_engine::TurnContext {
+                conversation_id: None,
                 system: Some(crate::ai::titling::TITLE_INSTRUCTION.to_owned()),
                 images: Vec::new(),
             };
@@ -6480,6 +6484,7 @@ mod tests {
             &crate::ai::providers::ProviderConfig::new("gemini", "unused", "test"),
             &[crate::core::domain::Message::user("What did you build?")],
             &crate::ai::engine::TurnContext {
+                conversation_id: None,
                 system: Some(system.clone()),
                 images: vec![],
             },

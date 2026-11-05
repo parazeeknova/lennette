@@ -71,6 +71,7 @@ pub async fn request_title(
     body: &str,
 ) -> Option<String> {
     let context = crate::ai::engine::TurnContext {
+        conversation_id: None,
         system: Some(TITLE_INSTRUCTION.to_owned()),
         images: Vec::new(),
     };

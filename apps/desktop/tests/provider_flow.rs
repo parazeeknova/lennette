@@ -55,6 +55,7 @@ async fn anthropic_preset_sends_native_messages_and_streams_only_visible_text() 
             &config,
             &[Message::user("Look")],
             &TurnContext {
+                conversation_id: None,
                 system: Some("Be concise".into()),
                 images: vec!["QUJD".into()],
             },
@@ -394,6 +395,7 @@ async fn speech_to_streamed_answer_and_finished_meeting_for_both_ai_services() {
             &session::chat_config(Some(&vault)).unwrap(),
             &history,
             &TurnContext {
+                conversation_id: None,
                 system: Some("Answer briefly".into()),
                 images: vec!["QUJD".into()],
             },

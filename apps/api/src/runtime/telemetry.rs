@@ -1,5 +1,4 @@
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithExportConfig;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub struct Telemetry {
@@ -35,9 +34,10 @@ pub fn init() -> anyhow::Result<Option<Telemetry>> {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "info,sqlx=warn".into());
     let provider = if std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_some() {
+        // Keep SDK timeout resolution: per-signal OTEL_*_TIMEOUT, then the shared
+        // OTEL_EXPORTER_OTLP_TIMEOUT (milliseconds), then the SDK default.
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_timeout(std::time::Duration::from_secs(5))
             .build()?;
         let resource = opentelemetry_sdk::Resource::builder()
             .with_service_name("lennette-api")
@@ -51,7 +51,6 @@ pub fn init() -> anyhow::Result<Option<Telemetry>> {
             .with_periodic_exporter(
                 opentelemetry_otlp::MetricExporter::builder()
                     .with_http()
-                    .with_timeout(std::time::Duration::from_secs(5))
                     .build()?,
             )
             .build();
@@ -60,7 +59,6 @@ pub fn init() -> anyhow::Result<Option<Telemetry>> {
             .with_batch_exporter(
                 opentelemetry_otlp::LogExporter::builder()
                     .with_http()
-                    .with_timeout(std::time::Duration::from_secs(5))
                     .build()?,
             )
             .build();

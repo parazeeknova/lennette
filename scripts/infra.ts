@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { waitForLocalIngestion } from "./openobserve.ts";
 
 const mode = process.argv[2];
 if (mode !== "up" && mode !== "down") throw new Error("Expected up or down");
@@ -37,5 +38,7 @@ if (mode === "up") {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   if (!healthy) throw new Error("OpenObserve did not become ready; inspect its container logs.");
+  console.log("Waiting for OpenObserve trace ingestion to warm up…");
+  await waitForLocalIngestion();
   console.log("PostgreSQL, Redis, ClamAV and OpenObserve are ready.");
 }

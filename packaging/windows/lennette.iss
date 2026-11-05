@@ -32,7 +32,7 @@ OutputBaseFilename=lennette-windows-x86_64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=..\..\src\assets\lennette.ico
+SetupIconFile=..\..\apps\desktop\src\assets\lennette.ico
 UninstallDisplayIcon={app}\lennette.ico
 UninstallDisplayName={#AppName}
 CloseApplications=yes
@@ -45,7 +45,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 [Files]
 Source: "{#SourceBinary}"; DestDir: "{app}"; DestName: "lennette.exe"; Flags: ignoreversion
 Source: "..\..\.github\README.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\src\assets\lennette.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\apps\desktop\src\assets\lennette.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Lennette"; Filename: "{app}\lennette.exe"; Parameters: "--normal"; WorkingDir: "{app}"; IconFilename: "{app}\lennette.ico"; AppUserModelID: "{#AppId}"; Comment: "{#AppDescription}"

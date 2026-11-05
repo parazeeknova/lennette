@@ -1,5 +1,6 @@
 use anyhow::Context;
 use lennette_server::{config::Config, migration::Migrator, state::AppState};
+use sea_orm::ConnectionTrait;
 use sea_orm_migration::MigratorTrait;
 use secrecy::ExposeSecret;
 
@@ -22,8 +23,18 @@ async fn main() -> anyhow::Result<()> {
             .connect_timeout(std::time::Duration::from_secs(30))
             .sqlx_logging(false);
         let db = sea_orm::Database::connect(options).await?;
-        Migrator::up(&db, None).await?;
-        db.close().await?;
+        let result = async {
+            // This dedicated one-connection pool keeps the session lock through
+            // pending-migration discovery and every migration transaction.
+            db.execute_unprepared("SELECT pg_advisory_lock(7354221, 0)")
+                .await?;
+            Migrator::up(&db, None).await
+        }
+        .await;
+        // Closing the session releases the lock on success and on failure.
+        let closed = db.close().await;
+        result?;
+        closed?;
         tracing::info!("database migrations complete");
     }
     if migrate_only {

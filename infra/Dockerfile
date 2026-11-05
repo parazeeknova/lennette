@@ -23,6 +23,6 @@ WORKDIR /data
 ENV API_BIND=0.0.0.0:8090
 EXPOSE 8090
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
-    CMD curl --fail --silent --output /dev/null http://127.0.0.1:8090/health/ready || exit 1
+    CMD curl --fail --silent --output /dev/null "http://127.0.0.1:${API_BIND##*:}/health/ready" || exit 1
 ENTRYPOINT ["lennette-server"]
 CMD ["--migrate"]

@@ -49,7 +49,11 @@ metrics, and cleanup metrics use this existing stack.
 
 Do not trust `CF-Connecting-IP` from arbitrary direct-origin requests.
 `TRUSTED_PROXY_IPS` stays unset until the origin route enforces Cloudflare source
-addresses and the trusted proxy addresses can be maintained reliably.
+addresses and the trusted proxy addresses can be maintained reliably. While unset,
+clients through the ingress share its socket-peer budgets: 30 `/auth/` requests
+and 1200 other API requests per 60 seconds, returning HTTP 429 above the limit.
+Paths containing `/auth/` or `/browser/` also share a global budget of 500 requests
+per 60 seconds; setting `TRUSTED_PROXY_IPS` does not change that global budget.
 
 ## Live billing
 

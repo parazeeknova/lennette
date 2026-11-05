@@ -15,6 +15,17 @@ function readEnv(path, optional = false) {
 
 export function developmentEnv(appDirectory, rootDirectory, inherited = process.env) {
   const local = readEnv(new URL(".env.local", rootDirectory), true);
+  const overrides = { ...inherited, ...local };
+  const pooledOverride = Object.hasOwn(overrides, "DEV_DATABASE_URL");
+  const directOverride = Object.hasOwn(overrides, "DEV_DATABASE_URL_UNPOOLED");
+  if (pooledOverride !== directOverride) {
+    throw new Error(
+      "Set DEV_DATABASE_URL and DEV_DATABASE_URL_UNPOOLED together; use an empty direct value to reuse the selected database",
+    );
+  }
+  if (pooledOverride && !overrides.DEV_DATABASE_URL) {
+    throw new Error("DEV_DATABASE_URL must not be empty");
+  }
   const env = {
     ...readEnv(new URL(".env.development", appDirectory)),
     ...inherited,
@@ -31,6 +42,9 @@ export function developmentEnv(appDirectory, rootDirectory, inherited = process.
     "REDIS_URL",
   ]) {
     if (env[`DEV_${key}`]) env[key] = env[`DEV_${key}`];
+  }
+  if (Object.hasOwn(env, "DEV_DATABASE_URL_UNPOOLED") && !env.DEV_DATABASE_URL_UNPOOLED) {
+    delete env.DATABASE_URL_UNPOOLED;
   }
   if (
     !local.OTEL_EXPORTER_OTLP_HEADERS &&

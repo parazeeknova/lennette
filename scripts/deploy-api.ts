@@ -5,6 +5,7 @@ type Application = { dockerImage?: string; appName: string; serverId?: string };
 type Deployment = { title: string; status: string };
 type Container = { containerId: string; name: string; state: string };
 
+/** Publish a verified release, recovering the previous running image on failure. */
 export async function deploy(
   env: Environment,
   transport: Transport = fetch,
@@ -46,13 +47,17 @@ export async function deploy(
   }
   const query = new URLSearchParams({ applicationId: appId });
   const current = await api<Application>(`application.one?${query}`);
-  await api("application.update", { applicationId: appId, dockerImage: image });
-  try {
-    await api("application.deploy", { applicationId: appId, title, description: image });
+  async function rollout(target: string, releaseTitle: string) {
+    await api("application.update", { applicationId: appId, dockerImage: target });
+    await api("application.deploy", {
+      applicationId: appId,
+      title: releaseTitle,
+      description: target,
+    });
     let complete = false;
     for (let attempt = 0; attempt < 90; attempt++) {
       const records = await api<Deployment[]>(`deployment.all?${query}`);
-      const record = records.find((item) => item.title === title);
+      const record = records.find((item) => item.title === releaseTitle);
       if (record?.status === "error")
         throw new Error("Dokploy deployment failed; inspect its deployment log");
       if (record?.status === "done") {
@@ -73,13 +78,17 @@ export async function deploy(
         if (current.serverId) params.set("serverId", current.serverId);
         // Dokploy's list strips digests for display. Inspect Docker's requested
         // image to verify the release, including health after a Swarm update.
-        const config = await api<{
-          Config: { Image: string };
-          State: { Health?: { Status: string } };
-        }>(`docker.getConfig?${params}`);
-        if (config.Config.Image === image && config.State.Health?.Status === "healthy") {
-          running = true;
-          break;
+        try {
+          const config = await api<{
+            Config: { Image: string };
+            State: { Health?: { Status: string } };
+          }>(`docker.getConfig?${params}`);
+          if (config.Config.Image === target && config.State.Health?.Status === "healthy") {
+            running = true;
+            break;
+          }
+        } catch {
+          /* A listed task may disappear while Swarm replaces it. */
         }
       }
       if (running) {
@@ -89,9 +98,6 @@ export async function deploy(
             signal: AbortSignal.timeout(10_000),
           });
           if (response.status === 204) {
-            console.log(
-              `Deployed ${image}; running digest verified; production readiness HTTP 204`,
-            );
             return;
           }
         } catch {
@@ -101,14 +107,21 @@ export async function deploy(
       await sleep(10_000);
     }
     throw new Error("Published image did not become ready within 5 minutes");
+  }
+  try {
+    // Include desired-image writes: the server may commit one even when its
+    // response is lost, so that ambiguous outcome needs recovery as well.
+    await rollout(image, title);
+    console.log(`Deployed ${image}; running digest verified; production readiness HTTP 204`);
   } catch (error) {
-    // Swarm rolls back the running service; restore Dokploy's desired image too.
     if (current.dockerImage && current.dockerImage !== image) {
       try {
-        await api("application.update", { applicationId: appId, dockerImage: current.dockerImage });
-      } catch {
-        console.error(
-          "Could not restore Dokploy's previous desired image; inspect the application.",
+        await rollout(current.dockerImage, `${title} (rollback)`);
+        console.error("Previous image redeployed; rollback digest and public readiness verified.");
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Deployment failed and rollback could not be verified; inspect Dokploy",
         );
       }
     }

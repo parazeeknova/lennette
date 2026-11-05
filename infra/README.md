@@ -3,7 +3,7 @@
 `.github/workflows/api-image.yml` checks the API and builds its Docker image on
 pull requests to `main`. Every push to `main` (including merges from `dev`)
 publishes `ghcr.io/parazeeknova/lennette-api` after API lint, unit tests and real
-PostgreSQL/Redis integration tests pass. Manual runs publish only from `main`.
+PostgreSQL/Redis integration tests pass. Manual runs publish only from `main`, unless `deploy_production` is enabled.
 PR builds never log in or publish. Initial setup can explicitly publish and
 deploy `dev` using the manual `deploy_production` input. Publishing uses the repository's
 `GITHUB_TOKEN` with `packages: write`; no registry password is needed.

@@ -98,6 +98,35 @@ test("Neon production env pulls cannot redirect development traffic or migration
   }
 });
 
+test("partial database overrides fail and an empty direct override cannot inherit production", () => {
+  const directory = mkdtempSync(join(tmpdir(), "lennette-database-pair-"));
+  try {
+    mkdirSync(join(directory, "api"));
+    writeFileSync(
+      join(directory, "api", ".env.development"),
+      "DEV_DATABASE_URL=postgres://localhost/local\nDEV_DATABASE_URL_UNPOOLED=postgres://localhost/local\n",
+    );
+    const root = pathToFileURL(`${directory}/`);
+    const app = new URL("api/", root);
+    for (const override of [
+      "DEV_DATABASE_URL=postgres://preview/dev\n",
+      "DEV_DATABASE_URL_UNPOOLED=postgres://direct-preview/dev\n",
+    ]) {
+      writeFileSync(join(directory, ".env.local"), override);
+      assert.throws(() => developmentEnv(app, root, {}), /together/);
+    }
+    writeFileSync(
+      join(directory, ".env.local"),
+      "DATABASE_URL_UNPOOLED=postgres://production/prod\nDEV_DATABASE_URL=postgres://preview/dev\nDEV_DATABASE_URL_UNPOOLED=\n",
+    );
+    const result = developmentEnv(app, root, {});
+    assert.equal(result.DATABASE_URL, "postgres://preview/dev");
+    assert.equal(Object.hasOwn(result, "DATABASE_URL_UNPOOLED"), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("development origins override shared production URLs and support explicit dev overrides", () => {
   const directory = mkdtempSync(join(tmpdir(), "lennette-origin-env-"));
   try {

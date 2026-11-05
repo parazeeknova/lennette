@@ -8,25 +8,10 @@ import type {
   WorkspaceItem,
   LiveAnswer,
 } from "@/lib/workspace";
+import { speakerName } from "@/lib/workspace-export";
 
 import { button, paper } from "./workspace-ui";
 
-const speakerLabel = (
-  item: WorkspaceItem,
-  kind: WorkspaceItem["kind"],
-  speakers: Map<string, string>
-) => {
-  if (kind === "meeting") {
-    return (
-      speakers.get(text(item.data["speaker"])) ||
-      text(item.data["who"], "Speaker")
-    );
-  }
-  if (item.data["role"] === "assistant") {
-    return "Lennette";
-  }
-  return item.data["role"] === "user" ? "You" : "Context";
-};
 const answerLabel = (answer: LiveAnswer) => {
   if (answer.truncated) {
     return "Partial live preview. Read the full answer in the saved conversation.";
@@ -45,53 +30,34 @@ export const History = ({
 }: {
   detail: ItemDetail | undefined;
   kind: WorkspaceItem["kind"];
-}) => {
-  const speakers = new Map(
-    detail?.extras
-      .filter((item) => item.kind === "speaker")
-      .map((item) => [text(item.data["speaker_key"]), text(item.data["name"])])
-  );
-  const recap = detail?.extras.find((item) => item.kind === "recap");
-  return (
-    <div className="space-y-4">
-      {recap && text(recap.data["content"]) ? (
-        <details className={paper}>
-          <summary className="cursor-pointer font-semibold">
-            Meeting recap
-          </summary>
-          <p className="mt-4 text-sm leading-7 [overflow-wrap:anywhere] whitespace-pre-wrap">
-            {text(recap.data["content"])}
-          </p>
-        </details>
-      ) : null}
-      {detail && detail.items.length === 0 ? (
-        <p className="py-8 text-center text-sm text-ink-soft">
-          {kind === "meeting"
-            ? "No saved transcript yet. Live words appear below as the meeting runs."
-            : "No messages saved in this conversation yet."}
+}) => (
+  <div className="space-y-4">
+    {detail && detail.items.length === 0 ? (
+      <p className="py-8 text-center text-sm text-ink-soft">
+        No saved entries match this view. Clear the search, or wait for desktop
+        sync.
+      </p>
+    ) : null}
+    {detail?.items.toReversed().map((item) => (
+      <article
+        key={item.id}
+        className={`${paper} ${item.data["role"] === "assistant" ? "border-sky/20 bg-sky/5" : ""}`}
+      >
+        <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold text-ink-soft">
+          <span>{speakerName(item, detail.extras)}</span>
+          <span>
+            {kind === "meeting"
+              ? clock(item.data["start_time"])
+              : dateLabel(item.data["timestamp"])}
+          </span>
+        </div>
+        <p className="text-sm leading-7 [overflow-wrap:anywhere] whitespace-pre-wrap">
+          {text(item.data["content"] ?? item.data["text"])}
         </p>
-      ) : null}
-      {detail?.items.toReversed().map((item) => (
-        <article
-          key={item.id}
-          className={`${paper} ${item.data["role"] === "assistant" ? "border-sky/20 bg-sky/5" : ""}`}
-        >
-          <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold text-ink-soft">
-            <span>{speakerLabel(item, kind, speakers)}</span>
-            <span>
-              {kind === "meeting"
-                ? clock(item.data["start_time"])
-                : dateLabel(item.data["timestamp"])}
-            </span>
-          </div>
-          <p className="text-sm leading-7 [overflow-wrap:anywhere] whitespace-pre-wrap">
-            {text(item.data["content"] ?? item.data["text"])}
-          </p>
-        </article>
-      ))}
-    </div>
-  );
-};
+      </article>
+    ))}
+  </div>
+);
 
 export const LivePanel = ({
   live,

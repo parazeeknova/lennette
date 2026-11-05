@@ -16,6 +16,7 @@ export interface ItemPage {
   next: string | null;
 }
 export interface ItemDetail extends ItemPage {
+  total_items?: number;
   record: WorkspaceItem;
   extras: WorkspaceItem[];
   files: WorkspaceItem[];

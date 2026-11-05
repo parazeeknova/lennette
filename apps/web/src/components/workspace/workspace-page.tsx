@@ -45,6 +45,8 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
   const [query, setQuery] = useState("");
   const [pages, setPages] = useState<(string | null)[]>([null]);
   const [detailPages, setDetailPages] = useState<(string | null)[]>([null]);
+  const [detailSearch, setDetailSearch] = useState("");
+  const [detailQuery, setDetailQuery] = useState("");
   const { live, status } = useWorkspaceLive(user.id, expired);
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -53,6 +55,13 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
     }, 250);
     return () => clearTimeout(timer);
   }, [search]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDetailQuery(detailSearch);
+      setDetailPages([null]);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [detailSearch]);
   const list = useQuery({
     queryKey: ["workspace", user.id, "items", kind, query, pages.at(-1)],
     gcTime: 0,
@@ -77,11 +86,12 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
       user.id,
       "detail",
       selected?.id,
+      detailQuery,
       detailPages.at(-1),
     ],
     gcTime: 0,
     queryFn: ({ signal }) => {
-      const params = new URLSearchParams({ account: user.id });
+      const params = new URLSearchParams({ account: user.id, q: detailQuery });
       const after = detailPages.at(-1);
       if (after) {
         params.set("after", after);
@@ -121,6 +131,8 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
   const open = (item: WorkspaceItem) => {
     setSelected(item);
     setDetailPages([null]);
+    setDetailSearch("");
+    setDetailQuery("");
   };
   const navigate = (next: ItemKind) => {
     setKind(next);
@@ -205,6 +217,9 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
           setPages={setPages}
         />
         <DetailPane
+          account={user.id}
+          search={detailSearch}
+          setSearch={setDetailSearch}
           now={now}
           current={current}
           selected={selected}

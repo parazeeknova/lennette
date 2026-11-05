@@ -22,6 +22,7 @@ import type {
 } from "@/lib/workspace";
 
 import { AttachmentPreview } from "./attachment-preview";
+import { RecordTools } from "./record-tools";
 import { History, LivePanel } from "./workspace-history";
 import { button, paper, Pager } from "./workspace-ui";
 
@@ -202,6 +203,9 @@ export const ListPane = ({
   </section>
 );
 interface DetailProps {
+  account: string;
+  search: string;
+  setSearch: (value: string) => void;
   current: WorkspaceItem | null;
   selected: WorkspaceItem | null;
   setSelected: (item: WorkspaceItem | null) => void;
@@ -215,6 +219,9 @@ interface DetailProps {
   now: number;
 }
 export const DetailPane = ({
+  account,
+  search,
+  setSearch,
   current,
   selected,
   setSelected,
@@ -268,6 +275,17 @@ export const DetailPane = ({
             />
           ) : (
             <>
+              {(current.kind === "meeting" ||
+                current.kind === "conversation") && (
+                <RecordTools
+                  key={current.id}
+                  item={current}
+                  account={account}
+                  expired={expired}
+                  search={search}
+                  setSearch={setSearch}
+                />
+              )}
               {hasLive(current, live, now) && (
                 <LivePanel
                   live={live}

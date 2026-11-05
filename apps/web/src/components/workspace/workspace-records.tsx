@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -8,9 +9,10 @@ import {
   Search,
   X,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-import { AccountError } from "@/lib/account-api";
+import { accountRequest, AccountError } from "@/lib/account-api";
 import { dateLabel, itemTitle, text } from "@/lib/workspace";
 import type {
   ItemKind,
@@ -219,6 +221,84 @@ interface DetailProps {
   expired: () => void;
   now: number;
 }
+const RecordAttachments = ({
+  account,
+  record,
+  initial,
+  open,
+  expired,
+}: {
+  account: string;
+  record: string;
+  initial: ItemDetail;
+  open: (item: WorkspaceItem) => void;
+  expired: () => void;
+}) => {
+  const [pages, setPages] = useState<(string | null)[]>([null]);
+  const after = pages.at(-1);
+  const query = useQuery({
+    queryKey: ["workspace", account, "files", record, after],
+    enabled: Boolean(after),
+    gcTime: 0,
+    queryFn: ({ signal }) =>
+      accountRequest<ItemDetail>(
+        `/workspace/items/${record}?${new URLSearchParams({ account, files_after: after ?? "", limit: "1" })}`,
+        "GET",
+        undefined,
+        signal
+      ),
+  });
+  useEffect(() => {
+    if (query.error instanceof AccountError && query.error.status === 401) {
+      expired();
+    }
+  }, [query.error, expired]);
+  const data = after ? query.data : initial;
+  if (!initial.files.length && !initial.files_next) {
+    return null;
+  }
+  return (
+    <section className="mt-7">
+      <h3 className="mb-3 font-semibold">Attachments</h3>
+      {query.isError && (
+        <div>
+          <p role="alert">Attachments could not be loaded.</p>
+          <button
+            type="button"
+            className={button}
+            onClick={() => {
+              void query.refetch();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {data?.files.map((file) => (
+          <button
+            key={file.id}
+            type="button"
+            className={button}
+            onClick={() => open(file)}
+          >
+            <FileText className="size-4" />
+            {itemTitle(file)}
+          </button>
+        ))}
+      </div>
+      <Pager
+        label="Attachment pages"
+        older={data?.files_next ?? null}
+        previous={pages.length > 1}
+        busy={query.isFetching}
+        back={() => setPages((value) => value.slice(0, -1))}
+        forward={(cursor) => setPages((value) => [...value, cursor])}
+      />
+    </section>
+  );
+};
+
 export const DetailPane = ({
   account,
   search,
@@ -353,24 +433,16 @@ export const DetailPane = ({
                   forward={(cursor) => setDetailPages((v) => [...v, cursor])}
                 />
               )}
-              {detail.data?.files.length ? (
-                <section className="mt-7">
-                  <h3 className="mb-3 font-semibold">Attachments</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {detail.data.files.map((file) => (
-                      <button
-                        key={file.id}
-                        type="button"
-                        className={button}
-                        onClick={() => open(file)}
-                      >
-                        <FileText className="size-4" />
-                        {itemTitle(file)}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
+              {detail.data && (
+                <RecordAttachments
+                  key={current.id}
+                  account={account}
+                  record={current.id}
+                  initial={detail.data}
+                  open={open}
+                  expired={expired}
+                />
+              )}
             </>
           )}
         </div>

@@ -31,6 +31,7 @@ pub(super) fn configured(state: &AppState, config: Config) -> AppState {
         upload_permits: state.upload_permits.clone(),
         events: state.events.clone(),
         workspace_permits: state.workspace_permits.clone(),
+        workspace_publisher: state.workspace_publisher.clone(),
         workspace_hub: tokio::sync::OnceCell::new(),
     }))
 }

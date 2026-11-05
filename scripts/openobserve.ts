@@ -2,12 +2,12 @@ import { randomBytes } from "node:crypto";
 
 // A healthy HTTP listener does not mean OpenObserve's ingester is initialized.
 // Send a real, synthetic span before allowing the local API to start exporting.
-export async function waitForLocalIngestion(env = process.env, request = fetch) {
+export async function waitForLocalIngestion(env = process.env, request = fetch, { now = Date.now, sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) } = {}) {
   const authorization = `Basic ${Buffer.from(`${env.OPENOBSERVE_USER_EMAIL ?? "dev@lennette.local"}:${env.OPENOBSERVE_USER_PASSWORD ?? "LocalOnly-Observe123!"}`).toString("base64")}`;
-  const deadline = Date.now() + 90_000;
+  const deadline = now() + 90_000;
   let failure = "collector unavailable";
-  while (Date.now() < deadline) {
-    const start = BigInt(Date.now()) * 1_000_000n;
+  while (now() < deadline) {
+    const start = BigInt(now()) * 1_000_000n;
     try {
       const response = await request("http://127.0.0.1:5080/api/default/v1/traces", {
         method: "POST",
@@ -16,7 +16,7 @@ export async function waitForLocalIngestion(env = process.env, request = fetch) 
           "Content-Type": "application/json",
           "stream-name": "lennette_api",
         },
-        signal: AbortSignal.timeout(Math.min(30_000, deadline - Date.now())),
+        signal: AbortSignal.timeout(Math.min(30_000, deadline - now())),
         body: JSON.stringify({ resourceSpans: [{
           resource: { attributes: [{ key: "service.name", value: { stringValue: "lennette-dev-readiness" } }] },
           scopeSpans: [{ scope: { name: "lennette-dev" }, spans: [{
@@ -43,7 +43,7 @@ export async function waitForLocalIngestion(env = process.env, request = fetch) 
       // Avoid printing URLs with credentials or collector response bodies.
       failure = "ingestion request failed or timed out";
     }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
   throw new Error(`OpenObserve ingestion did not become ready (${failure}); inspect its container logs.`);
 }

@@ -6,11 +6,13 @@ import {
   renderHook,
   screen,
   waitFor,
+  within,
   cleanup,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AttachmentPreview } from "@/components/workspace/attachment-preview";
 import { useWorkspaceLive } from "@/components/workspace/use-workspace-live";
 import { WorkspacePage } from "@/components/workspace/workspace-page";
 import type * as AccountApi from "@/lib/account-api";
@@ -333,4 +335,97 @@ describe("workspace reconnect transport", () => {
     unmount();
     cache.clear();
   });
+});
+
+it("retries a failed attachment request without leaving its preview", async () => {
+  const fetchFile = vi
+    .fn()
+    .mockResolvedValueOnce(new Response("", { status: 503 }))
+    .mockResolvedValueOnce(new Response("", { status: 401 }));
+  vi.stubGlobal("fetch", fetchFile);
+  const expired = vi.fn();
+  render(
+    <AttachmentPreview
+      item={{ id: "file", kind: "file", data: { mime_type: "text/plain" } }}
+      expired={expired}
+    />
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This file could not be loaded"
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(expired).toHaveBeenCalledOnce());
+  expect(fetchFile).toHaveBeenCalledTimes(2);
+});
+
+it("keeps attachments across history pages and pages files independently", async () => {
+  api.mockImplementation((path) => {
+    if (path === "/me") {
+      return Promise.resolve({
+        id: account,
+        name: "Sam",
+        email: "sam@example.test",
+      });
+    }
+    const record = {
+      id: conversation,
+      kind: "conversation",
+      data: { title: "File pages" },
+    };
+    if (!path.startsWith("/workspace/items/")) {
+      return Promise.resolve({ items: [record], next: null });
+    }
+    const params = new URLSearchParams(path.split("?")[1]);
+    const filesAfter = params.has("files_after");
+    return Promise.resolve({
+      record,
+      items: [],
+      extras: [],
+      next: params.has("after") ? null : "history-cursor",
+      files: [
+        {
+          id: filesAfter ? "second-file" : "first-file",
+          kind: "file",
+          data: { name: filesAfter ? "Second attachment" : "First attachment" },
+        },
+      ],
+      files_next: filesAfter ? null : "files-cursor",
+    });
+  });
+  const cache = client();
+  render(
+    <QueryClientProvider client={cache}>
+      <WorkspacePage />
+    </QueryClientProvider>
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /File pages/u }));
+  expect(
+    await screen.findByRole("button", { name: "First attachment" })
+  ).toBeInTheDocument();
+  fireEvent.click(
+    within(screen.getByRole("navigation", { name: "History pages" })).getByRole(
+      "button",
+      { name: "Older" }
+    )
+  );
+  await waitFor(() =>
+    expect(
+      api.mock.calls.some(([path]) => path.includes("after=history-cursor"))
+    ).toBe(true)
+  );
+  expect(
+    await screen.findByRole("button", { name: "First attachment" })
+  ).toBeInTheDocument();
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Attachment pages" })
+    ).getByRole("button", { name: "Older" })
+  );
+  expect(
+    await screen.findByRole("button", { name: "Second attachment" })
+  ).toBeInTheDocument();
+  expect(
+    api.mock.calls.some(([path]) => path.includes("files_after=files-cursor"))
+  ).toBe(true);
+  cache.clear();
 });

@@ -34,24 +34,78 @@ pub(crate) fn keys(account: Uuid) -> Vec<String> {
     ]
 }
 
-pub async fn publish(state: &AppState, p: &Principal, meeting: Option<Uuid>, event: Value) {
-    let frame = json!({"type":"live","meeting_id":meeting,"device_id":p.device_id,"event":event,"emitted_at":chrono::Utc::now().timestamp_millis()});
-    let raw = frame.to_string();
-    if raw.len() > 32 * 1024 {
-        tracing::warn!("oversized live event omitted; durable sync remains available");
-        return;
+const MAX_FRAME_BYTES: usize = 32 * 1024;
+
+/// A bounded, ordered worker keeps Redis delays out of provider output loops.
+#[derive(Clone)]
+pub struct Publisher(tokio::sync::mpsc::Sender<(Uuid, String)>);
+impl Publisher {
+    pub fn new(redis: Client, shutdown: tokio_util::sync::CancellationToken) -> Self {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel::<(Uuid, String)>(1024);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = shutdown.cancelled() => break,
+                    message = receiver.recv() => {
+                        let Some((account, raw)) = message else { break };
+                        let result = tokio::time::timeout(Duration::from_secs(2), redis.eval::<String, _, _, _>(
+                            super::redis::PUBLISH, keys(account), vec![raw, format!("live:{account}")],
+                        )).await;
+                        if !matches!(result, Ok(Ok(_))) {
+                            tracing::warn!("live relay unavailable; durable sync will recover saved content");
+                        }
+                    }
+                }
+            }
+        });
+        Self(sender)
     }
-    let result = tokio::time::timeout(
-        Duration::from_secs(2),
-        state.redis.eval::<String, _, _, _>(
-            super::redis::PUBLISH,
-            keys(p.account_id),
-            vec![raw, format!("live:{}", p.account_id)],
-        ),
-    )
-    .await;
-    if !matches!(result, Ok(Ok(_))) {
-        tracing::warn!("live relay unavailable; durable sync will recover saved content");
+}
+
+fn frames(p: &Principal, meeting: Option<Uuid>, event: Value) -> Vec<String> {
+    let mut frame = json!({"type":"live","meeting_id":meeting,"device_id":p.device_id,"event":event,"emitted_at":chrono::Utc::now().timestamp_millis()});
+    let raw = frame.to_string();
+    if raw.len() <= MAX_FRAME_BYTES {
+        return vec![raw];
+    }
+    if frame["event"]["type"] != "ai_delta" {
+        return Vec::new();
+    }
+    let Some(delta) = frame["event"]["delta"].as_str().map(str::to_owned) else {
+        return Vec::new();
+    };
+    let offset = frame["event"]["offset"].as_u64().unwrap_or(0);
+    let mut result = Vec::new();
+    let mut start = 0;
+    while start < delta.len() {
+        // A JSON-escaped byte takes at most six bytes. Reserve ample envelope space.
+        let mut end = (start + 4096).min(delta.len());
+        while !delta.is_char_boundary(end) {
+            end -= 1;
+        }
+        frame["event"]["delta"] = json!(&delta[start..end]);
+        frame["event"]["offset"] = json!(offset + start as u64);
+        let raw = frame.to_string();
+        if raw.len() > MAX_FRAME_BYTES {
+            return Vec::new();
+        }
+        result.push(raw);
+        start = end;
+    }
+    result
+}
+
+pub async fn publish(state: &AppState, p: &Principal, meeting: Option<Uuid>, event: Value) {
+    for raw in frames(p, meeting, event) {
+        if state
+            .workspace_publisher
+            .0
+            .try_send((p.account_id, raw))
+            .is_err()
+        {
+            tracing::warn!("live relay queue full; durable sync will recover saved content");
+            break;
+        }
     }
 }
 
@@ -318,6 +372,30 @@ async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_deltas_keep_utf8_json_limits_and_byte_offsets() {
+        let p = Principal {
+            account_id: Uuid::new_v4(),
+            device_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+        };
+        let delta = "é🌍\n\"\u{0000}".repeat(10000);
+        let raw = frames(
+            &p,
+            Some(Uuid::new_v4()),
+            json!({"type":"ai_delta","stream_id":Uuid::new_v4(),"offset":17,"delta":delta}),
+        );
+        assert!(raw.len() > 1);
+        let mut restored = String::new();
+        for raw in raw {
+            assert!(raw.len() <= MAX_FRAME_BYTES);
+            let frame: Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(frame["event"]["offset"], 17 + restored.len());
+            restored.push_str(frame["event"]["delta"].as_str().unwrap());
+        }
+        assert_eq!(restored, delta);
+    }
+
     #[test]
     fn cursors_are_bounded_redis_stream_ids() {
         for value in ["0-0", "123456789-42"] {

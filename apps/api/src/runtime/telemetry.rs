@@ -8,10 +8,11 @@ pub struct Telemetry {
 }
 impl Telemetry {
     pub fn shutdown(self) -> anyhow::Result<()> {
+        let budget = std::time::Duration::from_secs(5);
         let errors = [
-            self.traces.shutdown(),
-            self.metrics.shutdown(),
-            self.logs.shutdown(),
+            self.traces.shutdown_with_timeout(budget),
+            self.metrics.shutdown_with_timeout(budget),
+            self.logs.shutdown_with_timeout(budget),
         ]
         .into_iter()
         .filter_map(|result| result.err())

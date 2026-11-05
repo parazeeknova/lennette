@@ -6,12 +6,14 @@ export const paper =
   "rounded-2xl border border-white/70 bg-white/60 p-4 sm:p-5";
 
 export const Pager = ({
+  label = "History pages",
   older,
   previous,
   busy,
   back,
   forward,
 }: {
+  label?: string;
   older: string | null;
   previous: boolean;
   busy: boolean;
@@ -20,7 +22,7 @@ export const Pager = ({
 }) =>
   older || previous ? (
     <nav
-      aria-label="History pages"
+      aria-label={label}
       className="mt-5 flex items-center justify-between gap-2"
     >
       <button

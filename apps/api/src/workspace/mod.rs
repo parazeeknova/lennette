@@ -17,8 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-const SORT: &str =
-    "LEFT(COALESCE(data->>'updated_at',data->>'started_at',data->>'created_at',''),64)";
+const SORT: &str = "CASE WHEN COALESCE(data->>'updated_at',data->>'started_at',data->>'created_at','') ~ '^[0-9]{1,24}([.][0-9]{1,12})?$' THEN lpad(split_part(COALESCE(data->>'updated_at',data->>'started_at',data->>'created_at',''),'.',1),24,'0') || '.' || rpad(split_part(COALESCE(data->>'updated_at',data->>'started_at',data->>'created_at',''),'.',2),12,'0') ELSE LEFT(COALESCE(data->>'updated_at',data->>'started_at',data->>'created_at',''),64) END";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +33,7 @@ pub struct ListQuery {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PageQuery {
+    pub files_after: Option<Uuid>,
     pub account: Option<Uuid>,
     #[serde(default)]
     pub q: String,
@@ -217,13 +217,18 @@ pub async fn detail(
     }
     {
         let extras=state.db.query_all_raw(Statement::from_sql_and_values(DbBackend::Postgres,format!(
-            "SELECT id,kind,data FROM records WHERE account_id=$1 AND NOT deleted AND data->>'{field}'=$2 AND kind IN ('recap','context','speaker','analysis') ORDER BY kind,id LIMIT 32"),[p.account_id.into(),id.to_string().into()])).await?;
+            "SELECT id,kind,data FROM records WHERE account_id=$1 AND NOT deleted AND data->>'{field}'=$2 AND kind IN ('recap','context','speaker','analysis') AND (kind='speaker' OR id IN (SELECT id FROM records WHERE account_id=$1 AND NOT deleted AND data->>'{field}'=$2 AND kind IN ('recap','context','analysis') ORDER BY kind,id LIMIT 32)) ORDER BY kind,id"),[p.account_id.into(),id.to_string().into()])).await?;
         result["extras"]=json!(extras.into_iter().map(|r|Ok(json!({"id":r.try_get::<Uuid>("","id")?,"kind":r.try_get::<String>("","kind")?,"data":r.try_get::<Value>("","data")?}))).collect::<Result<Vec<_>>>()?);
     }
-    if q.after.is_none() {
+    {
         let files=state.db.query_all_raw(Statement::from_sql_and_values(DbBackend::Postgres,format!(
-            "SELECT DISTINCT a.id,a.name,a.content_type,a.size_bytes FROM attachments a JOIN attachment_refs f ON f.attachment_id=a.id AND f.account_id=a.account_id JOIN records r ON r.id=f.record_id AND r.account_id=f.account_id WHERE a.account_id=$1 AND NOT r.deleted AND (r.id=$2 OR r.data->>'{field}'=$3) LIMIT 32"),[p.account_id.into(),id.into(),id.to_string().into()])).await?;
-        result["files"]=json!(files.into_iter().map(|r|Ok(json!({"id":r.try_get::<Uuid>("","id")?,"kind":"file","data":{"name":r.try_get::<String>("","name")?,"mime_type":r.try_get::<String>("","content_type")?,"size_bytes":r.try_get::<i64>("","size_bytes")?}}))).collect::<Result<Vec<_>>>()?);
+            "SELECT DISTINCT a.id,a.name,a.content_type,a.size_bytes FROM attachments a JOIN attachment_refs f ON f.attachment_id=a.id AND f.account_id=a.account_id JOIN records r ON r.id=f.record_id AND r.account_id=f.account_id WHERE a.account_id=$1 AND NOT r.deleted AND (r.id=$2 OR r.data->>'{field}'=$3) AND ($4::uuid IS NULL OR a.id > $4) ORDER BY a.id LIMIT 33"),[p.account_id.into(),id.into(),id.to_string().into(),q.files_after.into()])).await?;
+        result["files_next"] = if files.len() > 32 {
+            json!(files[31].try_get::<Uuid>("", "id")?)
+        } else {
+            Value::Null
+        };
+        result["files"]=json!(files.into_iter().take(32).map(|r|Ok(json!({"id":r.try_get::<Uuid>("","id")?,"kind":"file","data":{"name":r.try_get::<String>("","name")?,"mime_type":r.try_get::<String>("","content_type")?,"size_bytes":r.try_get::<i64>("","size_bytes")?}}))).collect::<Result<Vec<_>>>()?);
     }
     Ok(Json(result))
 }

@@ -19,6 +19,7 @@ export const AttachmentPreview = ({
     body: string;
   } | null>(null);
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     let url: string | undefined;
@@ -70,12 +71,25 @@ export const AttachmentPreview = ({
         URL.revokeObjectURL(url);
       }
     };
-  }, [item.id, item.data, expired]);
+    // Each explicit retry must rerun the request even when the item is unchanged.
+    // eslint-disable-next-line react/exhaustive-effect-dependencies
+  }, [item.id, item.data, expired, attempt]);
   if (error) {
     return (
-      <p role="alert" className="p-5 text-sm text-ink-soft">
-        {error}
-      </p>
+      <div className="space-y-3 p-5 text-sm text-ink-soft">
+        <p role="alert">{error}</p>
+        <button
+          type="button"
+          className="glass glass-pill px-5 py-3 text-sm font-semibold"
+          onClick={() => {
+            setError("");
+            setPreview(null);
+            setAttempt((value) => value + 1);
+          }}
+        >
+          Retry
+        </button>
+      </div>
     );
   }
   if (!preview) {

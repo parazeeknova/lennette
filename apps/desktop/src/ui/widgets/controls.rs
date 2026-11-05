@@ -140,7 +140,7 @@ pub fn slider<V: 'static>(
     cx: &mut Context<V>,
     handler: impl Fn(&mut V, u32, &mut Context<V>) + Clone + 'static,
 ) -> impl IntoElement {
-    slider_enabled(id, theme, value, min, max, true, cx, handler)
+    slider_enabled(id, theme, value, min..=max, true, cx, handler)
 }
 
 /// A disabled slider keeps its value visible without registering pointer handlers.
@@ -148,12 +148,12 @@ pub fn slider_enabled<V: 'static>(
     id: impl Into<ElementId>,
     theme: &Theme,
     value: u32,
-    min: u32,
-    max: u32,
+    range: std::ops::RangeInclusive<u32>,
     enabled: bool,
     cx: &mut Context<V>,
     handler: impl Fn(&mut V, u32, &mut Context<V>) + Clone + 'static,
 ) -> impl IntoElement {
+    let (min, max) = (*range.start(), *range.end());
     let element_id: ElementId = id.into();
     let clamped = value.clamp(min, max);
     let range = (max.saturating_sub(min)).max(1) as f32;

@@ -2620,7 +2620,11 @@ impl Render for DashboardView {
                         .rounded(px(20.0))
                         .border_1()
                         .border_color(theme.border)
-                        .bg(theme.popover())
+                        .bg(if theme.is_glass() {
+                            Theme::with_alpha(Theme::DARK.background, 1.0)
+                        } else {
+                            theme.popover()
+                        })
                         .shadow_lg()
                         .child(
                             div()

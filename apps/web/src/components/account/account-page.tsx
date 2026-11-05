@@ -168,6 +168,23 @@ export const AccountPage = () => {
     if (!signedIn) {
       return;
     }
+    const stored = sessionStorage.getItem("account-return-hash");
+    if (stored === "#subscription") {
+      sessionStorage.removeItem("account-return-hash");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${window.location.search}${stored}`
+      );
+    }
+    if (window.location.hash === "#subscription") {
+      document.querySelector("#subscription")?.scrollIntoView();
+    }
+  }, [signedIn]);
+  useEffect(() => {
+    if (!signedIn) {
+      return;
+    }
     const events = new EventSource(`${API_URL}/v1/account/events`, {
       withCredentials: true,
     });
@@ -230,6 +247,7 @@ export const AccountPage = () => {
       ) {
         throw new Error("Sign-in link was invalid.");
       }
+      sessionStorage.setItem("account-return-hash", window.location.hash);
       window.location.assign(url.href);
     });
   return (

@@ -321,8 +321,7 @@ pub fn app_settings(
                 "transparency-slider",
                 theme,
                 if s.theme == ThemeChoice::Glass { 0 } else { s.transparency },
-                0,
-                100,
+                0..=100,
                 s.theme != ThemeChoice::Glass,
                 cx,
                 |view: &mut crate::ui::dashboard::view::DashboardView, new_val, cx| {

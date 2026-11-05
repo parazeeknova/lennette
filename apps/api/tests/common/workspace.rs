@@ -184,6 +184,7 @@ async fn workspace_reads_are_paginated_private_and_include_document_files() {
     .await;
     assert_eq!(second["items"].as_array().unwrap().len(), 5);
     assert!(second["next"].is_null());
+    assert_eq!(second["files"], first["files"]);
     let (_, transcript) = request(
         &app,
         "GET",
@@ -565,5 +566,117 @@ async fn workspace_chat_stream_uses_real_provider_frames_and_hides_background_tu
     state.shutdown.cancel();
     server.abort();
     provider_task.abort();
+    cleanup(state, account).await;
+}
+
+#[tokio::test]
+#[ignore = "requires isolated Postgres and Redis"]
+async fn workspace_numeric_order_speakers_and_files_do_not_truncate() {
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    let (state, app, account, tokens) = fixture().await;
+    subscribe(&state, account).await;
+    let meeting = Uuid::new_v4();
+    let mut mutations = vec![item(
+        meeting,
+        "meeting",
+        json!({"title":"Many participants","started_at":"2026-11-05 10:00:00"}),
+    )];
+    for timestamp in [9, 10, 100] {
+        mutations.push(item(
+            Uuid::new_v4(),
+            "conversation",
+            json!({"title":timestamp.to_string(),"updated_at":timestamp}),
+        ));
+    }
+    for i in 0..40 {
+        mutations.push(item(Uuid::new_v4(), "speaker", json!({"meeting_id":meeting,"speaker_key":format!("them:{i}"),"name":format!("Speaker {i}")})));
+        mutations.push(item(
+            Uuid::new_v4(),
+            "analysis",
+            json!({"meeting_id":meeting,"content":"{}"}),
+        ));
+    }
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            "/v1/sync/push",
+            Some(&tokens.access_token),
+            json!({"mutations":mutations})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    let (_, first) = request(
+        &app,
+        "GET",
+        "/v1/workspace/items?kind=conversation&limit=1",
+        Some(&tokens.access_token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(first["items"][0]["data"]["title"], "100");
+    let (_, second) = request(
+        &app,
+        "GET",
+        &format!(
+            "/v1/workspace/items?kind=conversation&limit=1&after={}",
+            first["next"].as_str().unwrap()
+        ),
+        Some(&tokens.access_token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(second["items"][0]["data"]["title"], "10");
+    state.db.execute_raw(Statement::from_sql_and_values(DbBackend::Postgres,
+        "WITH added AS (INSERT INTO attachments(id,account_id,name,content_type,size_bytes,sha256) SELECT gen_random_uuid(),$1,'file-' || n,'text/plain',1,'test' FROM generate_series(1,33) n RETURNING id) INSERT INTO attachment_refs(account_id,record_id,attachment_id) SELECT $1,$2,id FROM added", [account.into(),meeting.into()])).await.unwrap();
+    let (_, first) = request(
+        &app,
+        "GET",
+        &format!("/v1/workspace/items/{meeting}"),
+        Some(&tokens.access_token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(
+        first["extras"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["kind"] == "speaker")
+            .count(),
+        40
+    );
+    assert_eq!(
+        first["extras"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["kind"] == "analysis")
+            .count(),
+        32
+    );
+    assert_eq!(first["files"].as_array().unwrap().len(), 32);
+    let (_, second) = request(
+        &app,
+        "GET",
+        &format!(
+            "/v1/workspace/items/{meeting}?files_after={}",
+            first["files_next"].as_str().unwrap()
+        ),
+        Some(&tokens.access_token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(second["files"].as_array().unwrap().len(), 1);
+    assert!(second["files_next"].is_null());
+    assert!(
+        !first["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["id"] == second["files"][0]["id"])
+    );
     cleanup(state, account).await;
 }

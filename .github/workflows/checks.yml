@@ -62,7 +62,7 @@ jobs:
         working-directory: apps/web
         run: bun install --frozen-lockfile
       - name: TypeScript tooling tests
-        run: bun --no-env-file test scripts/dev-env.test.ts scripts/deploy-api.test.ts
+        run: bun --no-env-file test scripts/dev-env.test.ts scripts/deploy-api.test.ts scripts/openobserve.test.ts
       - name: Website format
         working-directory: apps/web
         run: bun run format:check

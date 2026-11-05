@@ -51,6 +51,10 @@ describe("Public page SEO", () => {
     expect(application.offers.description).toContain(
       "bill API usage separately"
     );
+    expect(application.offers.description).toContain(
+      "Managed subscriptions include AI, live transcription and synced storage"
+    );
+    expect(application.offers.description).not.toContain("not available");
     expect(application).not.toHaveProperty("aggregateRating");
     expect(application.downloadUrl).toBe(`${SITE_URL}/downloads`);
     expect(application.operatingSystem).toContain("macOS 13 or later");

@@ -20,6 +20,7 @@ export interface ItemDetail extends ItemPage {
   record: WorkspaceItem;
   extras: WorkspaceItem[];
   files: WorkspaceItem[];
+  files_next?: string | null;
 }
 export const text = (value: unknown, fallback = ""): string =>
   typeof value === "string" || typeof value === "number"

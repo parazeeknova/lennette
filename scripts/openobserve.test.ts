@@ -35,3 +35,13 @@ test("a reachable collector that rejects the span is not reported as ready", asy
   });
   assert.equal(calls, 2);
 });
+
+test("persistent span rejection fails at the readiness deadline", async () => {
+  let time = 0;
+  let calls = 0;
+  await assert.rejects(waitForLocalIngestion({}, async () => {
+    calls++;
+    return Response.json({ partialSuccess: { rejectedSpans: "1" } });
+  }, { now: () => time, sleep: async (ms) => { time += ms; } }), /did not become ready \(collector rejected the readiness span\)/);
+  assert.equal(calls, 90);
+});

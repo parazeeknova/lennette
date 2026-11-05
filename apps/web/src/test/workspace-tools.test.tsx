@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ExportFormatPicker } from "@/components/workspace/export-format";
 import { MeetingAnalytics } from "@/components/workspace/meeting-analytics";
 import { accountRequest } from "@/lib/account-api";
 import type { ItemDetail, WorkspaceItem } from "@/lib/workspace";
@@ -45,6 +46,25 @@ const page = (
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+});
+
+it("selects a custom export format, closes on Escape or outside click, and restores focus", () => {
+  const change = vi.fn();
+  render(
+    <ExportFormatPicker value="md" meeting disabled={false} change={change} />
+  );
+  const trigger = screen.getByText("Markdown", { selector: "summary" });
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("button", { name: "SRT: Timed subtitles" }));
+  expect(change).toHaveBeenCalledWith("srt");
+  expect(trigger.closest("details")).not.toHaveAttribute("open");
+  expect(trigger).toHaveFocus();
+  fireEvent.click(trigger);
+  fireEvent.keyDown(trigger, { key: "Escape" });
+  expect(trigger.closest("details")).not.toHaveAttribute("open");
+  fireEvent.click(trigger);
+  fireEvent.pointerDown(document.body);
+  expect(trigger.closest("details")).not.toHaveAttribute("open");
 });
 
 describe("complete history export", () => {

@@ -22,6 +22,7 @@ import type {
 } from "@/lib/workspace";
 
 import { AttachmentPreview } from "./attachment-preview";
+import { ExportControls } from "./export-controls";
 import { RecordTools } from "./record-tools";
 import { History, LivePanel } from "./workspace-history";
 import { button, paper, Pager } from "./workspace-ui";
@@ -240,7 +241,7 @@ export const DetailPane = ({
   >
     {current ? (
       <>
-        <div className="flex items-start gap-3 border-b border-white/70 px-4 py-5 sm:px-6">
+        <div className="relative z-10 flex flex-wrap items-start gap-3 border-b border-white/70 px-4 py-5 sm:px-6">
           <button
             type="button"
             onClick={() => setSelected(null)}
@@ -257,6 +258,16 @@ export const DetailPane = ({
               {itemTitle(current)}
             </h2>
           </div>
+          {["meeting", "conversation"].includes(current.kind) && (
+            <div className="order-last ml-auto flex w-full justify-end sm:order-none sm:w-auto">
+              <ExportControls
+                key={current.id}
+                item={current}
+                account={account}
+                expired={expired}
+              />
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setSelected(null)}

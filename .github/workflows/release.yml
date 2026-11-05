@@ -100,7 +100,7 @@ jobs:
         run: cargo build --locked --release --bin lennette --target ${{ matrix.target }}
       - name: Verify Linux application identity
         if: runner.os == 'Linux'
-        run: python3 scripts/check-app-identity.py target/${{ matrix.target }}/release/lennette
+        run: cargo xtask check-identity target/${{ matrix.target }}/release/lennette
       - name: Verify Windows native windows and shortcuts
         if: runner.os == 'Windows'
         shell: pwsh

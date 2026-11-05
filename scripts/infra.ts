@@ -9,14 +9,12 @@ const result = spawnSync(
     "compose",
     "-f",
     "infra/compose.yaml",
-    ...(mode === "up"
-      ? ["up", "-d", "--wait", "--wait-timeout", "300"]
-      : ["down"]),
+    ...(mode === "up" ? ["up", "-d", "--wait", "--wait-timeout", "300"] : ["down"]),
   ],
   {
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     stdio: "inherit",
-  }
+  },
 );
 if (result.error) {
   console.error("Could not run Docker. Start Docker Desktop and retry.");
@@ -38,9 +36,6 @@ if (mode === "up") {
     if (healthy) break;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  if (!healthy)
-    throw new Error(
-      "OpenObserve did not become ready; inspect its container logs."
-    );
+  if (!healthy) throw new Error("OpenObserve did not become ready; inspect its container logs.");
   console.log("PostgreSQL, Redis, ClamAV and OpenObserve are ready.");
 }

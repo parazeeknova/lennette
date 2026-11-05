@@ -15,16 +15,36 @@ function readEnv(path, optional = false) {
 
 export function developmentEnv(appDirectory, rootDirectory, inherited = process.env) {
   const local = readEnv(new URL(".env.local", rootDirectory), true);
+  const overrides = { ...inherited, ...local };
+  const pooledOverride = Object.hasOwn(overrides, "DEV_DATABASE_URL");
+  const directOverride = Object.hasOwn(overrides, "DEV_DATABASE_URL_UNPOOLED");
+  if (pooledOverride !== directOverride) {
+    throw new Error(
+      "Set DEV_DATABASE_URL and DEV_DATABASE_URL_UNPOOLED together; use an empty direct value to reuse the selected database",
+    );
+  }
+  if (pooledOverride && !overrides.DEV_DATABASE_URL) {
+    throw new Error("DEV_DATABASE_URL must not be empty");
+  }
   const env = {
     ...readEnv(new URL(".env.development", appDirectory)),
     ...inherited,
     ...local,
     NODE_ENV: "development",
   };
-  // Keep shared deployment URLs from overriding the local browser origin and
-  // OAuth callback. Custom development hosts use explicit DEV_* overrides.
-  for (const key of ["WEBSITE_URL", "API_PUBLIC_URL"]) {
+  // Neon pulls production connections into .env.local. Development must use
+  // its own database/cache, including the direct URL used by migrations.
+  for (const key of [
+    "WEBSITE_URL",
+    "API_PUBLIC_URL",
+    "DATABASE_URL",
+    "DATABASE_URL_UNPOOLED",
+    "REDIS_URL",
+  ]) {
     if (env[`DEV_${key}`]) env[key] = env[`DEV_${key}`];
+  }
+  if (Object.hasOwn(env, "DEV_DATABASE_URL_UNPOOLED") && !env.DEV_DATABASE_URL_UNPOOLED) {
+    delete env.DATABASE_URL_UNPOOLED;
   }
   if (
     !local.OTEL_EXPORTER_OTLP_HEADERS &&
@@ -43,7 +63,7 @@ export function developmentEnv(appDirectory, rootDirectory, inherited = process.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [app, ...command] = process.argv.slice(2);
   if (!["api", "web", "desktop"].includes(app) || command.length === 0) {
-    throw new Error("Usage: dev-env.mjs <api|web|desktop> <command> [args...]");
+    throw new Error("Usage: dev-env.ts <api|web|desktop> <command> [args...]");
   }
   const root = new URL("../", import.meta.url);
   const directory = new URL(`apps/${app}/`, root);

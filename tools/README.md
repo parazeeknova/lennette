@@ -8,12 +8,17 @@ cargo xtask --help
 cargo test --locked -p lennette-tools
 cargo xtask bump patch
 cargo xtask bump auto "feat(profiles): add interview background"
+cargo xtask check-identity target/release/lennette
 cargo xtask hyprland-smoke --help
 cargo xtask hyprland-overview --help
 ```
 
 `bump` updates the app version in both Cargo files, preserves formatting and
 stages those files. Existing Git hooks and `just bump` use the same Rust command.
+
+`check-identity` verifies binary metadata, the Linux desktop entry and the PWA
+manifest against Cargo metadata. macOS packaging uses `--write-macos-plist` and
+`--bundle` to populate and verify the bundle identity and branded artwork.
 
 `release` is for the main-branch GitHub Actions publish job. It checks both
 platforms' files/checksums before any GitHub call, creates/resumes a draft, then

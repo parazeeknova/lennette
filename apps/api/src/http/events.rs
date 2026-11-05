@@ -39,7 +39,11 @@ pub fn start(state: AppState) {
     tokio::spawn(async move {
         loop {
             let result: anyhow::Result<()> = async {
-                let mut listener = sqlx::postgres::PgListener::connect(state.config.database_url.expose_secret()).await?;
+                // LISTEN needs a session connection; transaction poolers can
+                // leak notifications into unrelated requests and lose events.
+                let url = state.config.database_url_unpooled.as_ref()
+                    .unwrap_or(&state.config.database_url);
+                let mut listener = sqlx::postgres::PgListener::connect(url.expose_secret()).await?;
                 listener.listen("lennette_account_events").await?;
                 state.events.send(Uuid::nil()).ok(); // Reconnect invalidates potentially missed snapshots.
                 loop {

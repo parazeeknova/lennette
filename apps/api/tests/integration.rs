@@ -41,6 +41,9 @@ async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
         database_url: SecretString::from(std::env::var("TEST_DATABASE_URL").unwrap_or(
             "postgres://lennette:local-development-only@127.0.0.1:55432/lennette".into(),
         )),
+        database_url_unpooled: std::env::var("TEST_DATABASE_URL_UNPOOLED")
+            .ok()
+            .map(SecretString::from),
         redis_url: SecretString::from(
             std::env::var("TEST_REDIS_URL")
                 .unwrap_or("redis://:local-development-only@127.0.0.1:56379/1".into()),

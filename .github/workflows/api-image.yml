@@ -14,14 +14,21 @@ on:
       - infra/Dockerfile
       - .dockerignore
       - .github/workflows/api-image.yml
+      - scripts/deploy-api.ts
+      - scripts/deploy-api.test.ts
   workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: Publish and deploy this branch for initial production setup
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 # Serialize publication so an older main build cannot overwrite latest later.
 concurrency:
-  group: api-image-${{ github.ref }}
+  group: api-image-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -64,6 +71,11 @@ jobs:
           key: api-linux
       - name: Format
         run: cargo fmt -p lennette-server -p lennette-protocol -p lennette-attachments -- --check
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+      - name: Deployment safety tests
+        run: bun test scripts/deploy-api.test.ts
       - name: Lint
         run: cargo clippy --locked -p lennette-server -p lennette-protocol -p lennette-attachments --all-targets -- -D warnings
       - name: Unit tests
@@ -74,8 +86,10 @@ jobs:
   image:
     name: Build and publish API
     needs: checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The Dokploy production host is ARM64; compile natively rather than emulate.
+    runs-on: ubuntu-24.04-arm
+    # Leave time to verify recovery as well as the image build and first rollout.
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
@@ -83,27 +97,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
       - name: Image version
         id: version
         env:
           REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
-          python3 - <<'PY'
-          import os, re, tomllib
-          from pathlib import Path
-          version = tomllib.loads(Path('apps/api/Cargo.toml').read_text())['package']['version']
-          if not re.fullmatch(r'\d+\.\d+\.\d+', version):
-              raise SystemExit('API package version must be major.minor.patch')
-          image = 'ghcr.io/' + os.environ['REPOSITORY'].lower() + '-api'
-          sha = os.environ['GITHUB_SHA']
-          build = f"{version}-main.{os.environ['GITHUB_RUN_NUMBER']}.{sha[:12]}"
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write(f'image={image}\nversion={build}\nsha={sha}\n')
-          PY
+          bun -e '
+            import { appendFileSync } from "node:fs";
+            const { version } = Bun.TOML.parse(await Bun.file("apps/api/Cargo.toml").text()).package;
+            if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("API version must be major.minor.patch");
+            const image = "ghcr.io/" + process.env.REPOSITORY.toLowerCase() + "-api";
+            const sha = process.env.GITHUB_SHA;
+            const channel = process.env.GITHUB_REF === "refs/heads/main" ? "main" : "bootstrap";
+            const build = `${version}-${channel}.${process.env.GITHUB_RUN_NUMBER}.${sha.slice(0, 12)}`;
+            appendFileSync(process.env.GITHUB_OUTPUT, `image=${image}\nversion=${build}\nsha=${sha}\n`);
+          '
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.deploy_production)
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
@@ -115,8 +130,8 @@ jobs:
         with:
           context: .
           file: infra/Dockerfile
-          platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          platforms: linux/arm64
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.deploy_production) }}
           tags: |
             ${{ steps.version.outputs.image }}:${{ steps.version.outputs.version }}
             ${{ steps.version.outputs.image }}:sha-${{ steps.version.outputs.sha }}
@@ -130,6 +145,16 @@ jobs:
           cache-to: type=gha,mode=max,scope=lennette-api
           provenance: mode=max
           sbom: true
+      - name: Deploy published digest to Dokploy
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || inputs.deploy_production)
+        env:
+          DOKPLOY_URL: ${{ vars.DOKPLOY_URL }}
+          DOKPLOY_APPLICATION_ID: ${{ vars.DOKPLOY_APPLICATION_ID }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          API_HEALTH_URL: https://lennapi.itssingularity.com/health/ready
+          API_IMAGE: ${{ steps.version.outputs.image }}@${{ steps.build.outputs.digest }}
+          DEPLOYMENT_TITLE: API ${{ github.sha }} (run ${{ github.run_id }}, attempt ${{ github.run_attempt }})
+        run: bun scripts/deploy-api.ts
       - name: Publish build summary
         env:
           IMAGE: ${{ steps.version.outputs.image }}

@@ -99,6 +99,12 @@ async fn workspace_reads_are_paginated_private_and_include_document_files() {
         "transcript",
         json!({"meeting_id":meeting,"text":"A saved transcript","who":"You","start_time":12.5}),
     ));
+    mutations.push(item(Uuid::new_v4(), "analysis", json!({"meeting_id":meeting,"status":"ready","content":"{\"segments\":[]}","source_lines":1})));
+    mutations.push(item(
+        Uuid::new_v4(),
+        "speaker",
+        json!({"meeting_id":meeting,"speaker_key":"them:0","name":"Sam"}),
+    ));
     assert_eq!(
         request(
             &app,
@@ -135,6 +141,7 @@ async fn workspace_reads_are_paginated_private_and_include_document_files() {
     let (status, first) = request(&app, "GET", &path, Some(&tokens.access_token), json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(first["items"].as_array().unwrap().len(), 20);
+    assert_eq!(first["total_items"], 25);
     assert_eq!(first["items"][0]["data"]["content"], "Answer 24");
     assert_eq!(first["files"][0]["id"], uploaded["id"]);
     // A stable keyset cursor still works after its boundary row is deleted.
@@ -186,6 +193,45 @@ async fn workspace_reads_are_paginated_private_and_include_document_files() {
     )
     .await;
     assert_eq!(transcript["items"][0]["data"]["text"], "A saved transcript");
+    assert!(
+        transcript["extras"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|extra| extra["kind"] == "analysis" && extra["data"]["status"] == "ready")
+    );
+    let (_, searched) = request(
+        &app,
+        "GET",
+        &format!("/v1/workspace/items/{conversation}?q=Answer%2024"),
+        Some(&tokens.access_token),
+        json!({}),
+    )
+    .await;
+    assert_eq!(searched["items"].as_array().unwrap().len(), 1);
+    assert_eq!(searched["items"][0]["data"]["content"], "Answer 24");
+    let (_, absent) = request(
+        &app,
+        "GET",
+        &format!("/v1/workspace/items/{meeting}?q=unmatched"),
+        Some(&tokens.access_token),
+        json!({}),
+    )
+    .await;
+    assert!(absent["items"].as_array().unwrap().is_empty());
+    assert_eq!(absent["total_items"], 1);
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            &format!("/v1/workspace/items/{meeting}?q={}", "x".repeat(201)),
+            Some(&tokens.access_token),
+            json!({})
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
     let (_, doc) = request(
         &app,
         "GET",

@@ -35,6 +35,8 @@ pub struct ListQuery {
 #[serde(deny_unknown_fields)]
 pub struct PageQuery {
     pub account: Option<Uuid>,
+    #[serde(default)]
+    pub q: String,
     pub after: Option<String>,
     pub limit: Option<u64>,
 }
@@ -147,6 +149,9 @@ pub async fn detail(
     Path(id): Path<Uuid>,
     Query(q): Query<PageQuery>,
 ) -> Result<Json<Value>> {
+    if q.q.chars().count() > 200 {
+        return Err(ApiError::BadRequest("search up to 200 characters".into()));
+    }
     if q.account.is_some_and(|id| id != p.account_id) {
         return Err(ApiError::Unauthorized);
     }
@@ -189,8 +194,8 @@ pub async fn detail(
         return Err(ApiError::BadRequest("invalid history cursor".into()));
     }
     let rows=state.db.query_all_raw(Statement::from_sql_and_values(DbBackend::Postgres,format!(
-        "SELECT id,kind,{sort} AS sort_key,data FROM records WHERE account_id=$1 AND NOT deleted AND data->>'{field}'=$2 AND kind=$3 AND ($4::double precision IS NULL OR ({sort},id)<($4::double precision,$5::uuid)) ORDER BY {sort} DESC,id DESC LIMIT $6"),
-        [p.account_id.into(),id.to_string().into(),child.into(),after.into(),cursor.as_ref().map(|c|c.id).into(),((limit+1) as i64).into()])).await?;
+        "SELECT id,kind,{sort} AS sort_key,data FROM records WHERE account_id=$1 AND NOT deleted AND data->>'{field}'=$2 AND kind=$3 AND ($4::double precision IS NULL OR ({sort},id)<($4::double precision,$5::uuid)) AND POSITION($7 IN lower(COALESCE(data->>'text',data->>'content','') || ' ' || COALESCE(data->>'who',data->>'role',''))) > 0 ORDER BY {sort} DESC,id DESC LIMIT $6"),
+        [p.account_id.into(),id.to_string().into(),child.into(),after.into(),cursor.as_ref().map(|c|c.id).into(),((limit+1) as i64).into(),q.q.to_lowercase().into()])).await?;
     let items = rows
         .into_iter()
         .map(|r| {
@@ -206,9 +211,16 @@ pub async fn detail(
     result["items"] = paged["items"].clone();
     result["next"] = paged["next"].clone();
     if q.after.is_none() {
+        let count=state.db.query_one_raw(Statement::from_sql_and_values(DbBackend::Postgres,format!(
+            "SELECT COUNT(*) AS count FROM records WHERE account_id=$1 AND NOT deleted AND kind=$3 AND data->>'{field}'=$2"),[p.account_id.into(),id.to_string().into(),child.into()])).await?.ok_or(ApiError::NotFound)?;
+        result["total_items"] = json!(count.try_get::<i64>("", "count")?);
+    }
+    {
         let extras=state.db.query_all_raw(Statement::from_sql_and_values(DbBackend::Postgres,format!(
             "SELECT id,kind,data FROM records WHERE account_id=$1 AND NOT deleted AND data->>'{field}'=$2 AND kind IN ('recap','context','speaker','analysis') ORDER BY kind,id LIMIT 32"),[p.account_id.into(),id.to_string().into()])).await?;
         result["extras"]=json!(extras.into_iter().map(|r|Ok(json!({"id":r.try_get::<Uuid>("","id")?,"kind":r.try_get::<String>("","kind")?,"data":r.try_get::<Value>("","data")?}))).collect::<Result<Vec<_>>>()?);
+    }
+    if q.after.is_none() {
         let files=state.db.query_all_raw(Statement::from_sql_and_values(DbBackend::Postgres,format!(
             "SELECT DISTINCT a.id,a.name,a.content_type,a.size_bytes FROM attachments a JOIN attachment_refs f ON f.attachment_id=a.id AND f.account_id=a.account_id JOIN records r ON r.id=f.record_id AND r.account_id=f.account_id WHERE a.account_id=$1 AND NOT r.deleted AND (r.id=$2 OR r.data->>'{field}'=$3) LIMIT 32"),[p.account_id.into(),id.into(),id.to_string().into()])).await?;
         result["files"]=json!(files.into_iter().map(|r|Ok(json!({"id":r.try_get::<Uuid>("","id")?,"kind":"file","data":{"name":r.try_get::<String>("","name")?,"mime_type":r.try_get::<String>("","content_type")?,"size_bytes":r.try_get::<i64>("","size_bytes")?}}))).collect::<Result<Vec<_>>>()?);

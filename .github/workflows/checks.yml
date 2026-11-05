@@ -75,15 +75,22 @@ jobs:
       - name: Website tests
         working-directory: apps/web
         run: bun run test
-      - name: Website SSR and SEO checks
+      - name: Build website for Cloudflare
+        working-directory: apps/web
+        run: bun run build
+      - name: Website Cloudflare SSR and SEO checks
         working-directory: apps/web
         shell: bash
         run: |
-          bun run dev --host 127.0.0.1 --port 18080 > "$RUNNER_TEMP/lennette-web-seo.log" 2>&1 &
+          bunx --no-install wrangler dev --ip 127.0.0.1 --port 18080 > "$RUNNER_TEMP/lennette-web-seo.log" 2>&1 &
           web_pid=$!
           trap 'kill "$web_pid" 2>/dev/null || true' EXIT
           for attempt in {1..60}; do
             if curl --fail --silent --output /dev/null http://127.0.0.1:18080/; then break; fi
             sleep 1
           done
+          if ! curl --fail --silent --output /dev/null http://127.0.0.1:18080/; then
+            cat "$RUNNER_TEMP/lennette-web-seo.log"
+            exit 1
+          fi
           bun run seo:check http://127.0.0.1:18080

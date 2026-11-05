@@ -61,7 +61,7 @@ struct MockS3 {
 #[tokio::test]
 #[ignore = "requires local Postgres and Redis"]
 async fn removing_the_last_record_reference_queues_erasure_and_refunds_storage() {
-    let (state, app, account, tokens) = fixture().await;
+    let (state, app, account, tokens) = storage_fixture().await;
     subscribe(&state, account).await;
     let blob = Uuid::new_v4();
     let path = format!("/v1/attachments?id={blob}&name=notes.txt&content_type=text%2Fplain");
@@ -113,7 +113,7 @@ async fn removing_the_last_record_reference_queues_erasure_and_refunds_storage()
 #[ignore = "requires local Postgres and Redis"]
 async fn unsafe_or_unscanned_uploads_never_reach_storage_or_quota() {
     use object_store::ObjectStore;
-    let (state, app, account, tokens) = fixture().await;
+    let (state, app, account, tokens) = storage_fixture().await;
     subscribe(&state, account).await;
     assert_eq!(
         body_request(
@@ -222,7 +222,7 @@ async fn unsafe_or_unscanned_uploads_never_reach_storage_or_quota() {
 async fn durable_upload_journal_reaps_crash_orphans_and_preserves_committed_files() {
     use lennette_server::entities::object_uploads;
     use object_store::ObjectStoreExt;
-    let (state, app, account, tokens) = fixture().await;
+    let (state, app, account, tokens) = storage_fixture().await;
     subscribe(&state, account).await;
     let orphan = Uuid::new_v4();
     storage::cleanup::begin(&state, account, orphan)
@@ -300,7 +300,7 @@ async fn durable_upload_journal_reaps_crash_orphans_and_preserves_committed_file
 #[tokio::test]
 #[ignore = "requires local Postgres and Redis"]
 async fn unconfigured_storage_fails_closed_without_charging_quota() {
-    let (state, _, account, tokens) = fixture().await;
+    let (state, _, account, tokens) = storage_fixture().await;
     subscribe(&state, account).await;
     let mut unavailable = configured(&state, state.config.clone());
     Arc::get_mut(&mut unavailable.0).unwrap().attachments = None;
@@ -393,7 +393,7 @@ async fn s3(State(s): State<Arc<MockS3>>, request: Request<Body>) -> axum::respo
 async fn signed_r2_roundtrip_failures_quota_and_account_deletion() {
     let mock = Arc::new(MockS3::default());
     let (endpoint, task) = serve(Router::new().fallback(s3).with_state(mock.clone())).await;
-    let (original, _, account_id, tokens) = fixture().await;
+    let (original, _, account_id, tokens) = storage_fixture().await;
     let mut config = original.config.clone();
     config.r2 = Some(R2Config {
         endpoint: endpoint.parse().unwrap(),
@@ -593,7 +593,19 @@ async fn signed_r2_roundtrip_failures_quota_and_account_deletion() {
     );
     mock.fail.store(false, Ordering::SeqCst);
     mock.fail_next.store(1, Ordering::SeqCst);
-    storage::cleanup::reconcile(&state).await.unwrap();
+    // The DELETE handler also starts a sweep. A concurrent sweep can skip its
+    // advisory lock, so wait for durable erasure rather than one sweep's return.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            storage::cleanup::reconcile(&state).await.unwrap();
+            if mock.objects.lock().await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("account objects must be erased after storage recovers");
     assert!(mock.objects.lock().await.is_empty());
     task.abort();
     cleanup(state, account_id).await;

@@ -5631,7 +5631,9 @@ impl Render for Overlay {
 
         let hidden = self.runtime_settings.hide_app_icon || crate::cli::private_overlay_enabled();
         let backdrop = (
-            self.runtime_settings.backdrop_blur && crate::ui::widgets::blur::enabled(self.opacity),
+            self.runtime_settings.backdrop_blur
+                && !self.theme.is_glass()
+                && crate::ui::widgets::blur::enabled(self.opacity),
             self.theme.foreground.r < 0.5,
             hidden,
         );
@@ -5780,7 +5782,9 @@ impl Render for Overlay {
             .p(px(1.0))
             .bg(self.surfaces().background());
         let empty = self.show_empty_wordmark();
-        let panel_content = if empty {
+        let panel_content = if empty && !self.runtime_settings.show_watermark {
+            div().flex_1().min_h(px(0.0)).w_full().into_any_element()
+        } else if empty {
             let wordmark_size = (f32::from(window.viewport_size().width) * 0.16).clamp(88.0, 150.0);
             div().flex_1().min_h(px(0.0)).w_full().flex().flex_col()
                 .items_center().justify_center().pt(px(64.0)).px(px(24.0)).gap(px(12.0))

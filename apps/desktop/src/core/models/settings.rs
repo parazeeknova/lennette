@@ -291,6 +291,7 @@ pub struct Settings {
     /// UI text size as a percentage of the base scale (85 to 140).
     pub font_scale: u32,
     pub show_borders: bool,
+    pub show_watermark: bool,
     pub backdrop_blur: bool,
     pub autostart: bool,
     pub startup_privacy: bool,
@@ -329,6 +330,7 @@ impl Default for Settings {
             transparency: 50,
             font_scale: 100,
             show_borders: true,
+            show_watermark: true,
             backdrop_blur: true,
             autostart: false,
             startup_privacy: false,
@@ -367,6 +369,7 @@ mod keys {
     pub const THEME: &str = "theme";
     pub const TRANSPARENCY: &str = "transparency";
     pub const FONT_SCALE: &str = "font_scale";
+    pub const SHOW_WATERMARK: &str = "show_watermark";
     pub const SHOW_BORDERS: &str = "show_borders";
     pub const BACKDROP_BLUR: &str = "backdrop_blur";
     pub const AUTOSTART: &str = "autostart";
@@ -414,6 +417,7 @@ impl Settings {
             // Clamped so the layout never collapses or overflows its panels.
             font_scale: number(keys::FONT_SCALE, defaults.font_scale).clamp(85, 140),
             show_borders: flag(keys::SHOW_BORDERS, defaults.show_borders),
+            show_watermark: flag(keys::SHOW_WATERMARK, defaults.show_watermark),
             backdrop_blur: flag(keys::BACKDROP_BLUR, defaults.backdrop_blur),
             autostart: flag(keys::AUTOSTART, defaults.autostart),
             startup_privacy: flag("startup_privacy", defaults.startup_privacy),
@@ -498,6 +502,7 @@ impl Settings {
             (keys::TRANSPARENCY, self.transparency.to_string()),
             (keys::FONT_SCALE, self.font_scale.to_string()),
             (keys::SHOW_BORDERS, self.show_borders.to_string()),
+            (keys::SHOW_WATERMARK, self.show_watermark.to_string()),
             (keys::BACKDROP_BLUR, self.backdrop_blur.to_string()),
             (keys::AUTOSTART, self.autostart.to_string()),
             ("startup_privacy", self.startup_privacy.to_string()),
@@ -606,6 +611,7 @@ mod tests {
         assert_eq!(settings.theme, ThemeChoice::Dark);
         assert_eq!(settings.transparency, 50);
         assert!(settings.always_on_top);
+        assert!(settings.show_watermark);
         assert_eq!(settings.overlay_size, "sm");
     }
 
@@ -617,6 +623,7 @@ mod tests {
             transparency: 80,
             font_scale: 120,
             show_borders: false,
+            show_watermark: false,
             backdrop_blur: false,
             autostart: true,
             startup_privacy: true,

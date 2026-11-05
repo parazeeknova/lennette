@@ -2495,7 +2495,7 @@ impl Render for DashboardView {
         }
         self.theme = Theme::from_settings(&self.settings.settings);
         let hidden = self.settings.settings.hide_app_icon || crate::cli::private_overlay_enabled();
-        let opacity = if self.settings.settings.backdrop_blur {
+        let opacity = if self.settings.settings.backdrop_blur && !self.theme.is_glass() {
             self.settings.settings.transparency as f32 / 100.0
         } else {
             0.0

@@ -11,6 +11,9 @@ pub enum Surface {
 }
 
 pub fn tint(theme: Theme, surface: Surface) -> Rgba {
+    if theme.is_glass() {
+        return Theme::with_alpha(theme.background, 0.0);
+    }
     let light = theme.foreground.r < 0.5;
     let alpha = match (light, surface) {
         (true, Surface::Input) => 0.78,
@@ -48,8 +51,7 @@ pub fn apply(window: &Window, theme: Theme, opacity: f32) {
     }
     #[cfg(not(windows))]
     {
-        let _ = theme;
-        window.set_background_appearance(if enabled(opacity) {
+        window.set_background_appearance(if !theme.is_glass() && enabled(opacity) {
             gpui::WindowBackgroundAppearance::Blurred
         } else {
             gpui::WindowBackgroundAppearance::Transparent
@@ -65,7 +67,10 @@ mod tests {
         assert!(!enabled(0.0));
         assert!(!enabled(1.0));
         assert!(enabled(0.5));
-        for theme in [Theme::LIGHT, Theme::DARK, Theme::GLASS] {
+        for surface in [Surface::Input, Surface::Pill, Surface::Menu] {
+            assert_eq!(tint(Theme::GLASS, surface).a, 0.0);
+        }
+        for theme in [Theme::LIGHT, Theme::DARK] {
             let input = tint(theme, Surface::Input);
             let menu = tint(theme, Surface::Menu);
             assert!(input.a >= 0.6);

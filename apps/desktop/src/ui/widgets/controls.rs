@@ -140,6 +140,20 @@ pub fn slider<V: 'static>(
     cx: &mut Context<V>,
     handler: impl Fn(&mut V, u32, &mut Context<V>) + Clone + 'static,
 ) -> impl IntoElement {
+    slider_enabled(id, theme, value, min, max, true, cx, handler)
+}
+
+/// A disabled slider keeps its value visible without registering pointer handlers.
+pub fn slider_enabled<V: 'static>(
+    id: impl Into<ElementId>,
+    theme: &Theme,
+    value: u32,
+    min: u32,
+    max: u32,
+    enabled: bool,
+    cx: &mut Context<V>,
+    handler: impl Fn(&mut V, u32, &mut Context<V>) + Clone + 'static,
+) -> impl IntoElement {
     let element_id: ElementId = id.into();
     let clamped = value.clamp(min, max);
     let range = (max.saturating_sub(min)).max(1) as f32;
@@ -214,7 +228,10 @@ pub fn slider<V: 'static>(
         .flex_shrink_0()
         .w(px(SLIDER_WIDTH))
         .h(px(32.0))
-        .cursor(gpui::CursorStyle::ResizeLeftRight)
+        .opacity(if enabled { 1.0 } else { 0.35 })
+        .when(enabled, |style| {
+            style.cursor(gpui::CursorStyle::ResizeLeftRight)
+        })
         .id(element_id)
         .child(
             div()
@@ -266,7 +283,7 @@ pub fn slider<V: 'static>(
                         .bg(theme.fill(Theme::with_alpha(theme.background, 0.5))),
                 ),
         )
-        .child(pointer)
+        .when(enabled, |style| style.child(pointer))
 }
 
 fn slider_value(position: f32, min: u32, max: u32) -> u32 {

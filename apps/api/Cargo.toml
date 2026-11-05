@@ -19,7 +19,7 @@ tower-http = { version = "0.7", features = ["cors", "trace", "request-id", "sens
 sea-orm = { version = "2.0.4", default-features = false, features = ["macros", "sqlx-postgres", "runtime-tokio-rustls", "with-uuid", "with-json", "with-chrono"] }
 sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "postgres"] }
-fred = { version = "10.1", features = ["i-scripts", "i-keys", "i-pubsub"] }
+fred = { version = "10.1", features = ["enable-rustls-ring", "i-scripts", "i-keys", "i-pubsub"] }
 reqwest = { workspace = true, default-features = false, features = [ "json", "stream", "form"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 serde = { workspace = true, features = ["derive"] }

@@ -5,17 +5,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { developmentEnv } from "./dev-env.mjs";
+import { developmentEnv } from "./dev-env.ts";
 
 test("app defaults work without a local file; root overrides stay scoped", () => {
   const directory = mkdtempSync(join(tmpdir(), "lennette-env-"));
   try {
     for (const app of ["api", "web"]) {
       mkdirSync(join(directory, app));
-      writeFileSync(
-        join(directory, app, ".env.development"),
-        `APP=${app}\nVALUE=default\n`
-      );
+      writeFileSync(join(directory, app, ".env.development"), `APP=${app}\nVALUE=default\n`);
     }
     const root = pathToFileURL(`${directory}/`);
     const api = new URL("api/", root);
@@ -24,7 +21,7 @@ test("app defaults work without a local file; root overrides stay scoped", () =>
     assert.equal(developmentEnv(api, root, { VALUE: "shell" }).VALUE, "shell");
     writeFileSync(
       join(directory, ".env.local"),
-      'VALUE=override\nPRIVATE_KEY="local test value"\n'
+      'VALUE=override\nPRIVATE_KEY="local test value"\n',
     );
     const result = developmentEnv(api, root, { VALUE: "shell" });
     assert.equal(result.VALUE, "override");
@@ -43,23 +40,22 @@ test("local OpenObserve overrides derive ingestion auth without replacing explic
     mkdirSync(join(directory, "api"));
     writeFileSync(
       join(directory, "api", ".env.development"),
-      "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:5080/api/default\nOTEL_EXPORTER_OTLP_HEADERS=default\n"
+      "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:5080/api/default\nOTEL_EXPORTER_OTLP_HEADERS=default\n",
     );
     writeFileSync(
       join(directory, ".env.local"),
-      "OPENOBSERVE_USER_EMAIL=test@example.test\nOPENOBSERVE_USER_PASSWORD=local-test-only\n"
+      "OPENOBSERVE_USER_EMAIL=test@example.test\nOPENOBSERVE_USER_PASSWORD=local-test-only\n",
     );
     const root = pathToFileURL(`${directory}/`);
     const result = developmentEnv(new URL("api/", root), root, {});
     expectHeader(result.OTEL_EXPORTER_OTLP_HEADERS);
     writeFileSync(
       join(directory, ".env.local"),
-      "OPENOBSERVE_USER_EMAIL=test@example.test\nOTEL_EXPORTER_OTLP_HEADERS=explicit\n"
+      "OPENOBSERVE_USER_EMAIL=test@example.test\nOTEL_EXPORTER_OTLP_HEADERS=explicit\n",
     );
     assert.equal(
-      developmentEnv(new URL("api/", root), root, {})
-        .OTEL_EXPORTER_OTLP_HEADERS,
-      "explicit"
+      developmentEnv(new URL("api/", root), root, {}).OTEL_EXPORTER_OTLP_HEADERS,
+      "explicit",
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -68,18 +64,52 @@ test("local OpenObserve overrides derive ingestion auth without replacing explic
 
 function expectHeader(value) {
   const encoded = value.split("Basic%20")[1].split(",")[0];
-  assert.equal(
-    Buffer.from(encoded, "base64").toString(),
-    "test@example.test:local-test-only"
-  );
+  assert.equal(Buffer.from(encoded, "base64").toString(), "test@example.test:local-test-only");
 }
+
+test("Neon production env pulls cannot redirect development traffic or migrations", () => {
+  const directory = mkdtempSync(join(tmpdir(), "lennette-database-env-"));
+  try {
+    mkdirSync(join(directory, "api"));
+    writeFileSync(
+      join(directory, "api", ".env.development"),
+      "DEV_DATABASE_URL=postgres://localhost/local\nDEV_DATABASE_URL_UNPOOLED=postgres://localhost/local\nDEV_REDIS_URL=redis://localhost/0\n",
+    );
+    writeFileSync(
+      join(directory, ".env.local"),
+      "DATABASE_URL=postgres://production/prod\nDATABASE_URL_UNPOOLED=postgres://direct-production/prod\nREDIS_URL=rediss://production/0\n",
+    );
+    const root = pathToFileURL(`${directory}/`);
+    const app = new URL("api/", root);
+    const result = developmentEnv(app, root, {});
+    assert.equal(result.DATABASE_URL, "postgres://localhost/local");
+    assert.equal(result.DATABASE_URL_UNPOOLED, "postgres://localhost/local");
+    assert.equal(result.REDIS_URL, "redis://localhost/0");
+    writeFileSync(
+      join(directory, ".env.local"),
+      "DEV_DATABASE_URL=postgres://preview/dev\nDEV_DATABASE_URL_UNPOOLED=postgres://direct-preview/dev\nDEV_REDIS_URL=rediss://preview/0\n",
+    );
+    const preview = developmentEnv(app, root, {});
+    assert.equal(preview.DATABASE_URL, "postgres://preview/dev");
+    assert.equal(preview.DATABASE_URL_UNPOOLED, "postgres://direct-preview/dev");
+    assert.equal(preview.REDIS_URL, "rediss://preview/0");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("development origins override shared production URLs and support explicit dev overrides", () => {
   const directory = mkdtempSync(join(tmpdir(), "lennette-origin-env-"));
   try {
     mkdirSync(join(directory, "api"));
-    writeFileSync(join(directory, "api", ".env.development"), "DEV_WEBSITE_URL=http://localhost:8080\nDEV_API_PUBLIC_URL=http://localhost:8090\n");
-    writeFileSync(join(directory, ".env.local"), "WEBSITE_URL=https://lennette.itssingularity.com\nAPI_PUBLIC_URL=https://lennapi.itssingularity.com\n");
+    writeFileSync(
+      join(directory, "api", ".env.development"),
+      "DEV_WEBSITE_URL=http://localhost:8080\nDEV_API_PUBLIC_URL=http://localhost:8090\n",
+    );
+    writeFileSync(
+      join(directory, ".env.local"),
+      "WEBSITE_URL=https://lennette.itssingularity.com\nAPI_PUBLIC_URL=https://lennapi.itssingularity.com\n",
+    );
     const root = pathToFileURL(`${directory}/`);
     const app = new URL("api/", root);
     assert.equal(developmentEnv(app, root, {}).WEBSITE_URL, "http://localhost:8080");

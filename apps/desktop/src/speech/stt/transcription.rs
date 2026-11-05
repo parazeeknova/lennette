@@ -744,7 +744,7 @@ impl LiveTranscriber {
                                     }
                                 }
                                 Some(Ok(Message::Close(_))) | None => {
-                                    if !closing { return Err("The speech connection closed; recording stopped. Start again to reconnect.".into()); }
+                                    if !closing { return Err("The speech service disconnected; recording stopped. Start again to reconnect.".into()); }
                                     break;
                                 }
                                 Some(Err(error)) => return Err(error.to_string()),

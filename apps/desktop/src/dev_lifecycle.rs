@@ -3,12 +3,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static STOP: AtomicBool = AtomicBool::new(false);
 
 pub fn install() {
-    if std::env::var_os("LENNETTE_DEV_LEASE").is_none() {
-        return;
-    }
     #[cfg(windows)]
-    unsafe {
-        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_signal), 1);
+    if std::env::var_os("LENNETTE_DEV_LEASE").is_some() {
+        unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_signal), 1);
+        }
     }
 }
 #[cfg(windows)]

@@ -19,7 +19,7 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$staging/Lennette.icon
 cp "$binary" "$app/Contents/MacOS/lennette"
 chmod +x "$app/Contents/MacOS/lennette"
 cp packaging/macos/Info.plist "$app/Contents/Info.plist"
-python3 scripts/check-app-identity.py "$binary" --write-macos-plist "$app/Contents/Info.plist"
+cargo xtask check-identity "$binary" --write-macos-plist "$app/Contents/Info.plist"
 for size in 16 32 128 256 512; do
     sips -z "$size" "$size" apps/desktop/src/assets/lennette_app_icon.png --out "$staging/Lennette.iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
@@ -30,7 +30,7 @@ cp apps/desktop/src/assets/lennette_app_icon.png "$app/Contents/Resources/"
 cp LICENSE "$app/Contents/Resources/"
 cp .github/README.md "$app/Contents/Resources/README.md"
 plutil -lint "$app/Contents/Info.plist"
-python3 scripts/check-app-identity.py "$binary" --bundle "$app"
+cargo xtask check-identity "$binary" --bundle "$app"
 # Ad-hoc signing works without a developer account. Distribution with trusted
 # Gatekeeper identity/notarization is a separate maintainer release step.
 codesign --force --sign "${MACOS_SIGN_IDENTITY:--}" "$app"

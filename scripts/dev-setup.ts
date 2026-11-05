@@ -14,7 +14,7 @@ function run(command, args, cwd = root) {
     console.error(
       command === "docker"
         ? "Local databases could not start. Start Docker Desktop and retry."
-        : "API database migration failed; check apps/api/.env.development and root .env.local."
+        : "API database migration failed; check apps/api/.env.development and root .env.local.",
     );
     process.exit(result.status ?? 1);
   }

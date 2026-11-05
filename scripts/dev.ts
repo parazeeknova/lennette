@@ -47,7 +47,7 @@ async function stop(code = 0) {
     else child.kill("SIGKILL");
   }
   if (infraStarted) {
-    const infra = spawn(process.execPath, ["scripts/infra.mjs", "down"], {
+    const infra = spawn(process.execPath, ["scripts/infra.ts", "down"], {
       cwd: root,
       stdio: "inherit",
     });
@@ -78,7 +78,7 @@ try {
   writeFileSync(lease, "running");
   heartbeat = setInterval(() => writeFileSync(lease, "running"), 1000);
   infraStarted = true;
-  const setup = run(["scripts/dev-setup.mjs"]);
+  const setup = run(["scripts/dev-setup.ts"]);
   const setupCode = await done(setup);
   if (setupCode !== 0) throw new Error("Development setup failed.");
   if (!stopping) {

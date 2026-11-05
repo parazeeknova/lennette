@@ -27,6 +27,7 @@ pub struct Config {
     pub public_url: Url,
     pub website_url: Url,
     pub database_url: SecretString,
+    pub database_url_unpooled: Option<SecretString>,
     pub redis_url: SecretString,
     pub google: Option<OAuthConfig>,
     pub github: Option<OAuthConfig>,
@@ -76,6 +77,10 @@ impl Config {
             database_url: SecretString::from(env::var("DATABASE_URL").context(
                 "DATABASE_URL is required; use `bun run dev:api` to load development settings",
             )?),
+            database_url_unpooled: env::var("DATABASE_URL_UNPOOLED")
+                .ok()
+                .filter(|url| !url.is_empty())
+                .map(SecretString::from),
             redis_url: SecretString::from(env::var("REDIS_URL").context(
                 "REDIS_URL is required; use `bun run dev:api` to load development settings",
             )?),

@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useState } from "react";
 
 import skyHero from "@/assets/sky-hero.jpg";
@@ -240,6 +240,10 @@ const NotFound = () => {
 };
 
 export const Route = createFileRoute("/$")({
+  loader: () => {
+    throw notFound();
+  },
+  notFoundComponent: NotFound,
   // Every path that lands here is a miss, so the route owns the head: a
   // dedicated title and the same noindex policy the root shell assumes for
   // unknown routes.

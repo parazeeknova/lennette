@@ -2,6 +2,7 @@
 mod bump;
 #[cfg(target_os = "linux")]
 mod hyprland;
+mod identity;
 mod release;
 
 use anyhow::{Result, bail};
@@ -22,6 +23,7 @@ fn main() -> Result<()> {
     match command.as_str() {
         "release" => release::run(&root(), arguments),
         "bump" => bump::run(&root(), arguments),
+        "check-identity" => identity::run(&root(), arguments),
         #[cfg(target_os = "linux")]
         "hyprland-smoke" => hyprland::smoke(&root(), arguments),
         #[cfg(target_os = "linux")]
@@ -33,7 +35,7 @@ fn main() -> Result<()> {
 
 fn help() -> Result<()> {
     println!(
-        "Lennette repository tools\n\n  cargo xtask release\n  cargo xtask bump [patch|minor|major|auto] [message or message-file]\n  cargo xtask hyprland-smoke --help\n  cargo xtask hyprland-overview --help"
+        "Lennette repository tools\n\n  cargo xtask release\n  cargo xtask bump [patch|minor|major|auto] [message or message-file]\n  cargo xtask check-identity <binary> [--write-macos-plist <path>] [--bundle <path>]\n  cargo xtask hyprland-smoke --help\n  cargo xtask hyprland-overview --help"
     );
     Ok(())
 }

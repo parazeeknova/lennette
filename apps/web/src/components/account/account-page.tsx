@@ -289,7 +289,7 @@ export const AccountPage = () => {
             busy={busy}
             onConnect={(provider) => signIn(provider, "link")}
           />
-          <section className={card}>
+          <section id="subscription" className={card}>
             <h2 className="mb-3 text-xl font-semibold">
               Subscription & payments
             </h2>

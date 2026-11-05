@@ -40,7 +40,7 @@ describe("Public page SEO", () => {
     }
   });
 
-  it("describes the free app without presenting the waitlisted plan or ratings as available", () => {
+  it("describes the free app separately from managed subscriptions without fabricated ratings", () => {
     const graph = JSON.parse(
       pageHead("/pricing", PRICING_FAQS).scripts[0].children
     )["@graph"];

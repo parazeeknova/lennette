@@ -1,10 +1,8 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { useState } from "react";
 
 import skyHero from "@/assets/sky-hero.jpg";
 import { pillLinkClassName } from "@/components/page-shell";
 import { PlatformDownload } from "@/components/platform-download";
-import { WaitlistDialog } from "@/components/waitlist-dialog";
 
 // Keep the fine print legible against the clouds.
 const inkHalo =
@@ -129,9 +127,8 @@ const GlassZero = () => (
 
 interface NavItem {
   label: string;
-  to?: "/" | "/downloads" | "/pricing" | "/tutorial";
+  to: "/" | "/downloads" | "/pricing" | "/tutorial" | "/account";
   hash?: string;
-  waitlist?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -139,105 +136,82 @@ const navItems: NavItem[] = [
   { label: "Features", to: "/", hash: "features" },
   { label: "Downloads", to: "/downloads" },
   { label: "Pricing", to: "/pricing" },
-  { label: "Managed waitlist", waitlist: true },
+  { label: "Get Managed", to: "/account", hash: "subscription" },
 ];
 
-const NotFound = () => {
-  const [waitlistOpen, setWaitlistOpen] = useState(false);
-
-  return (
-    <main className="flex min-h-svh flex-col overflow-x-hidden bg-cloud">
-      <section className="relative isolate flex min-h-svh flex-1 flex-col overflow-hidden">
-        {/* Same sky as the hero, same slow drift. It bleeds into the page
+const NotFound = () => (
+  <main className="flex min-h-svh flex-col overflow-x-hidden bg-cloud">
+    <section className="relative isolate flex min-h-svh flex-1 flex-col overflow-hidden">
+      {/* Same sky as the hero, same slow drift. It bleeds into the page
             colour below instead of ending on a seam. */}
-        <img
-          src={skyHero}
-          alt=""
-          width={1920}
-          height={1088}
-          fetchPriority="high"
-          className="absolute inset-0 -z-20 h-full w-full animate-drift object-cover"
-        />
-        <div className="absolute inset-x-0 bottom-0 -z-10 h-72 bg-linear-to-b from-transparent to-cloud" />
-
-        <header className="relative z-30 flex items-center justify-between gap-4 px-6 pt-7 sm:px-10">
-          <Link to="/" className="flex items-center gap-2.5">
-            <img
-              src="/lennette.png"
-              alt=""
-              width={44}
-              height={30}
-              className="h-8 w-auto"
-            />
-            <span className="font-display text-2xl leading-none text-on-sky [text-shadow:0_1px_10px_oklch(0.42_0.12_250/0.35)]">
-              lennette
-            </span>
-          </Link>
-          <Link
-            to="/"
-            className="glass btn-liquid h-11 glass-pill px-5 text-sm"
-          >
-            <span>Back to the sky</span>
-          </Link>
-        </header>
-
-        <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-6 pt-8 pb-16 text-center">
-          <h1
-            aria-label="404"
-            className="flex items-center justify-center font-display text-[clamp(6rem,23vw,18rem)] leading-[0.9] whitespace-nowrap text-on-sky text-sky-shadow"
-          >
-            <span aria-hidden="true">4</span>
-            <span aria-hidden="true">
-              <GlassZero />
-            </span>
-            <span aria-hidden="true">4</span>
-          </h1>
-
-          <PlatformDownload />
-
-          <nav
-            aria-label="Popular pages"
-            className="mt-6 flex max-w-3xl flex-wrap items-center justify-center gap-3 sm:gap-4"
-          >
-            {navItems.map((item) =>
-              item.waitlist ? (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => setWaitlistOpen(true)}
-                  className={pillLinkClassName}
-                >
-                  <span>{item.label}</span>
-                </button>
-              ) : (
-                <Link
-                  key={item.label}
-                  to={item.to ?? "/"}
-                  {...(item.hash ? { hash: item.hash } : {})}
-                  className={pillLinkClassName}
-                >
-                  <span>{item.label}</span>
-                </Link>
-              )
-            )}
-          </nav>
-
-          <p
-            className="mt-12 text-xs text-ink-soft"
-            style={{ textShadow: inkHalo }}
-          >
-            Lennette is still up there, flying. This page never was.
-          </p>
-        </div>
-      </section>
-
-      <WaitlistDialog
-        open={waitlistOpen}
-        onClose={() => setWaitlistOpen(false)}
+      <img
+        src={skyHero}
+        alt=""
+        width={1920}
+        height={1088}
+        fetchPriority="high"
+        className="absolute inset-0 -z-20 h-full w-full animate-drift object-cover"
       />
-    </main>
-  );
-};
+      <div className="absolute inset-x-0 bottom-0 -z-10 h-72 bg-linear-to-b from-transparent to-cloud" />
+
+      <header className="relative z-30 flex items-center justify-between gap-4 px-6 pt-7 sm:px-10">
+        <Link to="/" className="flex items-center gap-2.5">
+          <img
+            src="/lennette.png"
+            alt=""
+            width={44}
+            height={30}
+            className="h-8 w-auto"
+          />
+          <span className="font-display text-2xl leading-none text-on-sky [text-shadow:0_1px_10px_oklch(0.42_0.12_250/0.35)]">
+            lennette
+          </span>
+        </Link>
+        <Link to="/" className="glass btn-liquid h-11 glass-pill px-5 text-sm">
+          <span>Back to the sky</span>
+        </Link>
+      </header>
+
+      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-6 pt-8 pb-16 text-center">
+        <h1
+          aria-label="404"
+          className="flex items-center justify-center font-display text-[clamp(6rem,23vw,18rem)] leading-[0.9] whitespace-nowrap text-on-sky text-sky-shadow"
+        >
+          <span aria-hidden="true">4</span>
+          <span aria-hidden="true">
+            <GlassZero />
+          </span>
+          <span aria-hidden="true">4</span>
+        </h1>
+
+        <PlatformDownload />
+
+        <nav
+          aria-label="Popular pages"
+          className="mt-6 flex max-w-3xl flex-wrap items-center justify-center gap-3 sm:gap-4"
+        >
+          {navItems.map((item) => (
+            <Link
+              key={item.label}
+              to={item.to}
+              {...(item.hash ? { hash: item.hash } : {})}
+              className={pillLinkClassName}
+            >
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </nav>
+
+        <p
+          className="mt-12 text-xs text-ink-soft"
+          style={{ textShadow: inkHalo }}
+        >
+          Lennette is still up there, flying. This page never was.
+        </p>
+      </div>
+    </section>
+  </main>
+);
 
 export const Route = createFileRoute("/$")({
   loader: () => {

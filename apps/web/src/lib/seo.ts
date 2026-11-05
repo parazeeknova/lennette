@@ -32,7 +32,7 @@ export const SEO_PAGES = {
   "/pricing": {
     name: "Pricing",
     title: `Lennette Pricing | Free BYOK & ${MANAGED_PLAN.price}/Month Managed`,
-    description: `Use Lennette free with your own AI and transcription keys. Join the waitlist for Managed at ${MANAGED_PLAN.price}/month, with provider usage included.`,
+    description: `Use Lennette free with your own AI and transcription keys, or subscribe to Managed from ${MANAGED_PLAN.price}/month with AI, live transcription and synced storage included.`,
     type: "WebPage",
   },
   "/downloads": {
@@ -105,7 +105,7 @@ export const pageHead = (path: PagePath, faqs: readonly FaqEntry[] = []) => {
         priceCurrency: "USD",
         url: pageUrl("/downloads"),
         description:
-          "The desktop app is free. AI and transcription providers bill API usage separately. Managed access is not available yet.",
+          "The desktop app is free. AI and transcription providers bill API usage separately. Managed subscriptions include AI, live transcription and synced storage.",
       },
     },
     {

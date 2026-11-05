@@ -30,6 +30,8 @@ pub(super) fn configured(state: &AppState, config: Config) -> AppState {
         attachments: state.attachments.clone(),
         upload_permits: state.upload_permits.clone(),
         events: state.events.clone(),
+        workspace_permits: state.workspace_permits.clone(),
+        workspace_hub: tokio::sync::OnceCell::new(),
     }))
 }
 pub(super) async fn serve(app: Router) -> (String, tokio::task::JoinHandle<()>) {
@@ -745,7 +747,7 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
         meeting.to_string()
     );
     let speech_url = format!(
-        "{}/v1/speech/live?meeting_id={meeting}",
+        "{}/v1/speech/live?meeting_id={meeting}&offset_seconds=42",
         api.replace("http://", "ws://")
     );
     let mut speech_request = speech_url.clone().into_client_request().unwrap();
@@ -775,9 +777,13 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
         next_json(&mut desktop).await["channel"]["alternatives"][0]["transcript"],
         "Live meeting words"
     );
+    let active = next_json(&mut mobile).await;
+    assert_eq!(active["event"]["type"], "meeting_active");
     let event = next_json(&mut mobile).await;
     assert_eq!(event["type"], "live");
     assert_eq!(event["event"]["type"], "transcript");
+    assert_eq!(event["event"]["result"]["start"], 42.0);
+    assert!(event["event"]["capture_id"].as_str().is_some());
     assert_eq!(event["meeting_id"], meeting.to_string());
     let mut duplicate = speech_url.into_client_request().unwrap();
     duplicate.headers_mut().insert(

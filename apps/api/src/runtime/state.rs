@@ -18,6 +18,8 @@ pub struct Inner {
     pub attachments: Option<Arc<dyn object_store::ObjectStore>>,
     pub upload_permits: Arc<tokio::sync::Semaphore>,
     pub events: tokio::sync::broadcast::Sender<uuid::Uuid>,
+    pub workspace_permits: Arc<tokio::sync::Semaphore>,
+    pub workspace_hub: tokio::sync::OnceCell<Arc<crate::workspace::realtime::Hub>>,
 }
 impl std::ops::Deref for AppState {
     type Target = Inner;
@@ -62,6 +64,8 @@ impl AppState {
             attachments,
             upload_permits: Arc::new(tokio::sync::Semaphore::new(2)),
             events: tokio::sync::broadcast::channel(256).0,
+            workspace_permits: Arc::new(tokio::sync::Semaphore::new(256)),
+            workspace_hub: tokio::sync::OnceCell::new(),
         })))
     }
     pub async fn limit(&self, key: String, max: i64, seconds: i64) -> Result<()> {

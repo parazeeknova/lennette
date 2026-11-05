@@ -36,6 +36,8 @@ pub struct ChatMessage {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChatRequest {
+    pub conversation_id: Option<Uuid>,
+    pub relay_live: Option<bool>,
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub stream: Option<bool>,
@@ -128,13 +130,7 @@ async fn own_meeting(state: &AppState, p: &Principal, id: Option<Uuid>) -> Resul
     Ok(())
 }
 pub async fn live(state: &AppState, p: &Principal, meeting: Option<Uuid>, event: Value) {
-    let payload = json!({"type":"live","meeting_id":meeting,"device_id":p.device_id,"event":event});
-    if let Ok(serialized) = serde_json::to_string(&payload) {
-        let _: std::result::Result<(), _> = state
-            .redis
-            .publish(format!("live:{}", p.account_id), serialized)
-            .await;
-    }
+    crate::workspace::realtime::publish(state, p, meeting, event).await;
 }
 
 pub async fn chat(
@@ -198,8 +194,19 @@ pub async fn chat(
         billing::settle(&state, reservation, 0).await?;
         return Err(ApiError::Unavailable);
     }
+    let relay = request.relay_live.unwrap_or(true);
+    let prompt = messages
+        .iter()
+        .rev()
+        .find(|m| m["role"] == "user")
+        .and_then(|m| m["content"].as_str())
+        .unwrap_or("")
+        .chars()
+        .take(4000)
+        .collect::<String>();
     let stream = async_stream::stream! {
         let mut upstream=upstream.bytes_stream();let mut pending=Vec::new();let mut usage=None;let mut done=false;let mut output=String::new();let stream_id=Uuid::new_v4();
+        if relay { live(&state,&p,request.meeting_id,json!({"type":"ai_start","stream_id":stream_id,"conversation_id":request.conversation_id,"prompt":prompt})).await; }
         while let Some(chunk)=tokio::select!{chunk=upstream.next()=>chunk,_=state.shutdown.cancelled()=>None}{
             let chunk=match chunk{Ok(c)=>c,Err(_)=>break};
             pending.extend_from_slice(&chunk);
@@ -212,7 +219,7 @@ pub async fn chat(
                         if let (Some(input),Some(output))=(event["usage"]["prompt_tokens"].as_i64(),event["usage"]["completion_tokens"].as_i64()) && input>=0 && output>=0{usage=Some(model.cost(input,output));}
                         if let Some(delta)=event["choices"][0]["delta"]["content"].as_str(){
                             output.push_str(delta);
-                            live(&state,&p,request.meeting_id,json!({"type":"ai_delta","stream_id":stream_id,"delta":delta})).await;
+                            if relay { live(&state,&p,request.meeting_id,json!({"type":"ai_delta","stream_id":stream_id,"conversation_id":request.conversation_id,"offset":output.len().saturating_sub(delta.len()),"delta":delta})).await; }
                         }
                     }
                 }
@@ -222,7 +229,7 @@ pub async fn chat(
             if output.len()>1024*1024{break}
         }
         if done && let Some(cost)=usage && let Err(e)=billing::settle(&state,reservation,cost).await{tracing::error!(%e,"AI usage settlement failed")}
-        live(&state,&p,request.meeting_id,json!({"type":"ai_done","stream_id":stream_id,"complete":done})).await;
+        if relay { live(&state,&p,request.meeting_id,json!({"type":"ai_done","stream_id":stream_id,"conversation_id":request.conversation_id,"total_bytes":output.len(),"complete":done})).await; }
     };
     Ok((
         [
@@ -238,6 +245,8 @@ pub async fn chat(
 #[derive(Deserialize)]
 pub struct SpeechQuery {
     pub meeting_id: Uuid,
+    #[serde(default)]
+    pub offset_seconds: f64,
 }
 pub async fn speech(
     State(state): State<AppState>,
@@ -245,6 +254,9 @@ pub async fn speech(
     Query(q): Query<SpeechQuery>,
     ws: WebSocketUpgrade,
 ) -> Result<Response> {
+    if !q.offset_seconds.is_finite() || !(0.0..=604800.0).contains(&q.offset_seconds) {
+        return Err(ApiError::BadRequest("invalid meeting offset".into()));
+    }
     if state.config.deepgram_key.expose_secret().is_empty() {
         return Err(ApiError::Unavailable);
     }
@@ -321,7 +333,9 @@ pub async fn speech(
         }
     };
     Ok(ws.max_message_size(64*1024).on_upgrade(move |ws|async move{
-        if let Err(error)=pipe_speech(&state,&p,q.meeting_id,ws,upstream,reservation,&key,&lease).await{tracing::debug!(%error,"speech stream ended")}
+        live(&state,&p,Some(q.meeting_id),json!({"type":"meeting_active"})).await;
+        if let Err(error)=pipe_speech(&state,&p,q.meeting_id,q.offset_seconds,ws,upstream,reservation,&key,&lease).await{tracing::debug!(%error,"speech stream ended")}
+        live(&state,&p,Some(q.meeting_id),json!({"type":"meeting_ended"})).await;
         let _:std::result::Result<i64,_>=state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",vec![key],vec![lease]).await;
     }))
 }
@@ -349,6 +363,7 @@ async fn pipe_speech(
     state: &AppState,
     p: &Principal,
     meeting: Uuid,
+    offset: f64,
     mut ws: WebSocket,
     mut upstream: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -364,10 +379,12 @@ async fn pipe_speech(
     let mut control_frames = 0u64;
     let started = tokio::time::Instant::now();
     let mut chunk_started = tokio::time::Instant::now();
+    let capture = Uuid::new_v4();
     loop {
         tokio::select! {
             _=state.shutdown.cancelled()=>break,
             _=interval.tick()=>{
+                live(state,p,Some(meeting),json!({"type":"meeting_active"})).await;
                 billing::settle(state,reservation,30).await?;
                 reservation=match billing::reserve(state,p.account_id,"speech",30).await{Ok(id)=>id,Err(_)=>break};
                 chunk_started=tokio::time::Instant::now();
@@ -398,7 +415,10 @@ async fn pipe_speech(
             response=upstream.next()=>match response{
                 Some(Ok(UpstreamMessage::Text(text)))=>{
                     if text.len()>256*1024{break}
-                    if let Ok(event)=serde_json::from_str::<Value>(&text) && event["type"]=="Results"{live(state,p,Some(meeting),json!({"type":"transcript","result":event})).await;}
+                    if let Ok(event)=serde_json::from_str::<Value>(&text) && event["type"]=="Results" {
+                        let words=event["channel"]["alternatives"][0]["transcript"].as_str().unwrap_or("").chars().take(8000).collect::<String>();
+                        live(state,p,Some(meeting),json!({"type":"transcript","capture_id":capture,"result":{"channel_index":event["channel_index"],"start":event["start"].as_f64().unwrap_or(0.0)+offset,"is_final":event["is_final"],"channel":{"alternatives":[{"transcript":words}]}}})).await;
+                    }
                     if ws.send(Message::Text(text.to_string().into())).await.is_err(){break}
                 },
                 Some(Ok(UpstreamMessage::Ping(data)))=>{upstream.send(UpstreamMessage::Pong(data)).await.ok();},

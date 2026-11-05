@@ -10,7 +10,28 @@ impl MigratorTrait for Migrator {
             Box::new(AccountEvents),
             Box::new(AttachmentRefs),
             Box::new(PlanUpgrades),
+            Box::new(Workspace),
         ]
+    }
+}
+struct Workspace;
+impl MigrationName for Workspace {
+    fn name(&self) -> &str {
+        "m20261105_007_workspace"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for Workspace {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .get_connection()
+            .execute_unprepared(include_str!("../../migrations/007_workspace.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager.get_connection().execute_unprepared("DROP INDEX records_workspace_list; DROP INDEX records_workspace_conversation; DROP INDEX records_workspace_meeting; DROP INDEX attachments_workspace_list;").await?;
+        Ok(())
     }
 }
 struct PlanUpgrades;

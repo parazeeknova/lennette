@@ -30,6 +30,8 @@ mod r2;
 mod scenarios;
 #[path = "common/upgrade.rs"]
 mod upgrade;
+#[path = "common/workspace.rs"]
+mod workspace;
 
 async fn fixture() -> (AppState, Router, Uuid, lennette_protocol::Tokens) {
     static MIGRATION: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();

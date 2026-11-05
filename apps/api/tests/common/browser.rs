@@ -59,7 +59,10 @@ async fn oauth_flow(
     )
 }
 
-async fn browser_cookie(state: &AppState, tokens: &lennette_protocol::Tokens) -> (String, Uuid) {
+pub(super) async fn browser_cookie(
+    state: &AppState,
+    tokens: &lennette_protocol::Tokens,
+) -> (String, Uuid) {
     let p = auth::authenticate(state, &tokens.access_token)
         .await
         .unwrap();

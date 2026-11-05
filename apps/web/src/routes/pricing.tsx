@@ -1,9 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
 
 import { FaqAccordion } from "@/components/faq-accordion";
 import { PageShell } from "@/components/page-shell";
-import { WaitlistDialog } from "@/components/waitlist-dialog";
 import { PRICING_FAQS } from "@/lib/faqs";
 import { pageHead } from "@/lib/seo";
 import { MANAGED_PLAN, MANAGED_PLUS_PLAN } from "@/lib/site";
@@ -19,9 +17,8 @@ interface Plan {
   features: string[];
   cta: {
     label: string;
-    to?: "/downloads" | "/tutorial";
-    href?: string;
-    waitlist?: boolean;
+    to: "/downloads" | "/account";
+    hash?: string;
   };
   emphasis: boolean;
 }
@@ -53,18 +50,19 @@ const plans: Plan[] = [
     cadence: "per month",
     summary:
       "The full Lennette experience, with AI answers and live transcription included in one monthly plan. No provider keys to manage.",
-    note: "Planned pricing in USD. Managed access is coming soon.",
+    note: "Billed monthly in USD. Cancel before your next renewal.",
     features: [
       "2,000 model-weighted AI credits per month",
-      "Live meeting transcription · allowance being finalized",
+      "300 minutes of live transcription per month",
       "Fast models for live AI answers",
       "Speaker labels in your transcripts",
       "10 GB of synced text and attachments · 3 devices",
       "AI and transcription API costs included",
     ],
     cta: {
-      label: "Join the waitlist",
-      waitlist: true,
+      label: "Get Managed",
+      to: "/account",
+      hash: "subscription",
     },
     emphasis: true,
   },
@@ -74,27 +72,21 @@ const plans: Plan[] = [
     cadence: "per month",
     summary:
       "More meeting time, more AI credits and fast models for live answers.",
-    note: "Planned pricing in USD. Managed access is coming soon.",
+    note: "Billed monthly in USD. Cancel before your next renewal.",
     features: [
       "6,000 model-weighted AI credits per month",
-      "Higher meeting allowance · details being finalized",
+      "1,200 minutes of live transcription per month",
       "Fast models with a larger AI allowance",
       "50 GB of synced text and attachments · 6 devices",
       "Live transcripts and answers across your devices",
       "AI and transcription API costs included",
     ],
-    cta: { label: "Join the waitlist", waitlist: true },
+    cta: { label: "Get Managed Plus", to: "/account", hash: "subscription" },
     emphasis: false,
   },
 ];
 
-const PlanCard = ({
-  plan,
-  onWaitlist,
-}: {
-  plan: Plan;
-  onWaitlist: () => void;
-}) => {
+const PlanCard = ({ plan }: { plan: Plan }) => {
   const ctaClass = [
     "glass glass-pill btn-liquid mt-8 w-full text-[0.95rem]",
     plan.emphasis
@@ -170,78 +162,48 @@ const PlanCard = ({
           {plan.note}
         </p>
 
-        {plan.cta.waitlist ? (
-          <button type="button" onClick={onWaitlist} className={ctaClass}>
-            {ctaLabel}
-          </button>
-        ) : null}
-        {!plan.cta.waitlist && plan.cta.to ? (
-          <Link to={plan.cta.to} className={ctaClass}>
-            {ctaLabel}
-          </Link>
-        ) : null}
-        {!plan.cta.waitlist && !plan.cta.to ? (
-          <a
-            href={plan.cta.href}
-            target="_blank"
-            rel="noreferrer"
-            className={ctaClass}
-          >
-            {ctaLabel}
-          </a>
-        ) : null}
+        <Link
+          to={plan.cta.to}
+          {...(plan.cta.hash ? { hash: plan.cta.hash } : {})}
+          className={ctaClass}
+        >
+          {ctaLabel}
+        </Link>
       </div>
     </article>
   );
 };
 
-const PricingPage = () => {
-  const [waitlistOpen, setWaitlistOpen] = useState(false);
+const PricingPage = () => (
+  <PageShell
+    breadcrumb="Pricing"
+    titleIcon={["Simple", "pricing."]}
+    intro={`Bring your own keys and use Lennette for free. Prefer everything included? Get Managed from ${MANAGED_MONTHLY_PRICE} a month, with AI and live transcription included.`}
+  >
+    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      {plans.map((plan) => (
+        <PlanCard key={plan.name} plan={plan} />
+      ))}
+    </div>
 
-  return (
-    <PageShell
-      breadcrumb="Pricing"
-      titleIcon={["Simple", "pricing."]}
-      intro={`Bring your own keys and use Lennette for free. Prefer everything included? Managed is coming soon at ${MANAGED_MONTHLY_PRICE} a month.`}
-    >
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {plans.map((plan) => (
-          <PlanCard
-            key={plan.name}
-            plan={plan}
-            onWaitlist={() => setWaitlistOpen(true)}
-          />
-        ))}
-      </div>
+    <p className="mt-6 text-sm leading-relaxed text-ink-soft">
+      Paid subscriptions, renewals and upgrades are non-refundable, including
+      unused time or usage, except where required by law. Cancel before your
+      next renewal to prevent future charges. See our{" "}
+      <Link to="/terms" hash="refunds" className="underline underline-offset-4">
+        refund terms
+      </Link>
+      .
+    </p>
 
-      <p className="mt-6 text-sm leading-relaxed text-ink-soft">
-        Paid subscriptions, renewals and upgrades are non-refundable, including
-        unused time or usage, except where required by law. Cancel before your
-        next renewal to prevent future charges. See our{" "}
-        <Link
-          to="/terms"
-          hash="refunds"
-          className="underline underline-offset-4"
-        >
-          refund terms
-        </Link>
-        .
-      </p>
-
-      <section className="mt-16">
-        <h2 className="font-display text-2xl text-ink">
-          Questions about pricing
-        </h2>
-        <FaqAccordion items={PRICING_FAQS} />
-      </section>
-
-      <WaitlistDialog
-        open={waitlistOpen}
-        onClose={() => setWaitlistOpen(false)}
-      />
-    </PageShell>
-  );
-};
+    <section className="mt-16">
+      <h2 className="font-display text-2xl text-ink">
+        Questions about pricing
+      </h2>
+      <FaqAccordion items={PRICING_FAQS} />
+    </section>
+  </PageShell>
+);
 
 export const Route = createFileRoute("/pricing")({
   head: () => pageHead("/pricing", PRICING_FAQS),

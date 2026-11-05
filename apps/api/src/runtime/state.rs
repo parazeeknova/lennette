@@ -18,6 +18,9 @@ pub struct Inner {
     pub attachments: Option<Arc<dyn object_store::ObjectStore>>,
     pub upload_permits: Arc<tokio::sync::Semaphore>,
     pub events: tokio::sync::broadcast::Sender<uuid::Uuid>,
+    pub workspace_permits: Arc<tokio::sync::Semaphore>,
+    pub workspace_publisher: crate::workspace::realtime::Publisher,
+    pub workspace_hub: tokio::sync::OnceCell<Arc<crate::workspace::realtime::Hub>>,
 }
 impl std::ops::Deref for AppState {
     type Target = Inner;
@@ -53,15 +56,21 @@ impl AppState {
             .as_ref()
             .map(crate::storage::connect)
             .transpose()?;
+        let shutdown = tokio_util::sync::CancellationToken::new();
+        let workspace_publisher =
+            crate::workspace::realtime::Publisher::new(redis.clone(), shutdown.clone());
         Ok(Self(Arc::new(Inner {
             config,
             db,
             redis,
             http,
-            shutdown: tokio_util::sync::CancellationToken::new(),
+            shutdown,
+            workspace_publisher,
             attachments,
             upload_permits: Arc::new(tokio::sync::Semaphore::new(2)),
             events: tokio::sync::broadcast::channel(256).0,
+            workspace_permits: Arc::new(tokio::sync::Semaphore::new(256)),
+            workspace_hub: tokio::sync::OnceCell::new(),
         })))
     }
     pub async fn limit(&self, key: String, max: i64, seconds: i64) -> Result<()> {

@@ -16,7 +16,7 @@
     "lint": "lerna run lint --concurrency 1",
     "format": "cargo fmt --all && bun run --cwd apps/web format",
     "test": "lerna run test --concurrency 1",
-    "test:dev-env": "bun --no-env-file test scripts/dev-env.test.ts",
+    "test:dev-env": "bun --no-env-file test scripts/dev-env.test.ts scripts/openobserve.test.ts",
     "test:integration": "bun --no-env-file scripts/dev-env.ts api cargo test -p lennette-server --tests -- --ignored",
     "infra:up": "bun scripts/infra.ts up",
     "infra:down": "bun scripts/infra.ts down",

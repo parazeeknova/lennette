@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -167,6 +168,23 @@ export const AccountPage = () => {
     if (!signedIn) {
       return;
     }
+    const stored = sessionStorage.getItem("account-return-hash");
+    if (stored === "#subscription") {
+      sessionStorage.removeItem("account-return-hash");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${window.location.search}${stored}`
+      );
+    }
+    if (window.location.hash === "#subscription") {
+      document.querySelector("#subscription")?.scrollIntoView();
+    }
+  }, [signedIn]);
+  useEffect(() => {
+    if (!signedIn) {
+      return;
+    }
     const events = new EventSource(`${API_URL}/v1/account/events`, {
       withCredentials: true,
     });
@@ -229,6 +247,7 @@ export const AccountPage = () => {
       ) {
         throw new Error("Sign-in link was invalid.");
       }
+      sessionStorage.setItem("account-return-hash", window.location.hash);
       window.location.assign(url.href);
     });
   return (
@@ -257,6 +276,19 @@ export const AccountPage = () => {
       )}
       {!loading && snapshot && (
         <>
+          <Link
+            to="/workspace"
+            className="glass flex items-center justify-between gap-4 rounded-3xl p-6 glass-blue"
+          >
+            <div>
+              <h2 className="text-xl font-semibold">Open your workspace</h2>
+              <p className="mt-2 text-sm">
+                Conversations, transcripts, attachments and live meeting
+                updates.
+              </p>
+            </div>
+            <span aria-hidden="true">→</span>
+          </Link>
           <section className={card}>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -289,7 +321,7 @@ export const AccountPage = () => {
             busy={busy}
             onConnect={(provider) => signIn(provider, "link")}
           />
-          <section className={card}>
+          <section id="subscription" className={card}>
             <h2 className="mb-3 text-xl font-semibold">
               Subscription & payments
             </h2>

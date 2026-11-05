@@ -40,7 +40,7 @@ describe("Public page SEO", () => {
     }
   });
 
-  it("describes the free app without presenting the waitlisted plan or ratings as available", () => {
+  it("describes the free app separately from managed subscriptions without fabricated ratings", () => {
     const graph = JSON.parse(
       pageHead("/pricing", PRICING_FAQS).scripts[0].children
     )["@graph"];
@@ -51,6 +51,10 @@ describe("Public page SEO", () => {
     expect(application.offers.description).toContain(
       "bill API usage separately"
     );
+    expect(application.offers.description).toContain(
+      "Managed subscriptions include AI, live transcription and synced storage"
+    );
+    expect(application.offers.description).not.toContain("not available");
     expect(application).not.toHaveProperty("aggregateRating");
     expect(application.downloadUrl).toBe(`${SITE_URL}/downloads`);
     expect(application.operatingSystem).toContain("macOS 13 or later");

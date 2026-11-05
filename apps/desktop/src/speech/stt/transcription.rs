@@ -503,11 +503,13 @@ impl LiveTranscriber {
         if config.api_key == "managed-session" {
             crate::managed::flush().await.map_err(SttError::Protocol)?;
             let account = crate::managed::active().ok_or(SttError::NotConfigured)?;
-            let meeting = crate::managed::meeting().ok_or_else(|| {
+            let (meeting, offset) = crate::managed::meeting_context().ok_or_else(|| {
                 SttError::Protocol("start a meeting before live transcription".into())
             })?;
             let mut url = account
-                .url(&format!("/v1/speech/live?meeting_id={meeting}"))
+                .url(&format!(
+                    "/v1/speech/live?meeting_id={meeting}&offset_seconds={offset}"
+                ))
                 .map_err(|e| SttError::Protocol(e.to_string()))?;
             let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
             url.set_scheme(scheme)

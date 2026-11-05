@@ -925,7 +925,7 @@ impl Overlay {
 
     /// Stream raw two-channel PCM as capture runs; never wait for a local utterance.
     fn spawn_transcription(&mut self, cx: &mut Context<Self>) {
-        crate::managed::set_meeting(self.meeting_id.as_deref());
+        crate::managed::set_meeting(self.meeting_id.as_deref(), self.meeting_offset);
         let Some(config) = self.speech.clone() else {
             return;
         };
@@ -1231,6 +1231,7 @@ impl Overlay {
     /// Stop the session. Returns the meeting that just ended, when one did,
     /// so the caller can have it named once its words are final.
     pub fn stop_listening(&mut self) -> Option<String> {
+        crate::managed::set_meeting(None, 0.0);
         self.pending_capture = None;
         if self.automatic_inflight {
             self.interrupt_response();
@@ -1451,6 +1452,7 @@ impl Overlay {
         );
 
         let context = crate::features::chat_engine::TurnContext {
+            conversation_id: self.chat.conversation_id().and_then(|id| id.parse().ok()),
             system: Some(self.selected_system_prompt()),
             images,
         };
@@ -2829,6 +2831,7 @@ impl Overlay {
             settings.smart_follow_ups_prompt
         )));
         let context = crate::features::chat_engine::TurnContext {
+            conversation_id: None,
             system: Some(self.selected_system_prompt()),
             images: Vec::new(),
         };
@@ -2918,6 +2921,7 @@ impl Overlay {
         let cancel = std::sync::Arc::new(tokio::sync::watch::channel(false).1);
         self.title_task = Some(cx.spawn(async move |_, cx| {
             let context = crate::features::chat_engine::TurnContext {
+                conversation_id: None,
                 system: Some(crate::ai::titling::TITLE_INSTRUCTION.to_owned()),
                 images: Vec::new(),
             };
@@ -5627,7 +5631,9 @@ impl Render for Overlay {
 
         let hidden = self.runtime_settings.hide_app_icon || crate::cli::private_overlay_enabled();
         let backdrop = (
-            self.runtime_settings.backdrop_blur && crate::ui::widgets::blur::enabled(self.opacity),
+            self.runtime_settings.backdrop_blur
+                && !self.theme.is_glass()
+                && crate::ui::widgets::blur::enabled(self.opacity),
             self.theme.foreground.r < 0.5,
             hidden,
         );
@@ -5776,7 +5782,9 @@ impl Render for Overlay {
             .p(px(1.0))
             .bg(self.surfaces().background());
         let empty = self.show_empty_wordmark();
-        let panel_content = if empty {
+        let panel_content = if empty && !self.runtime_settings.show_watermark {
+            div().flex_1().min_h(px(0.0)).w_full().into_any_element()
+        } else if empty {
             let wordmark_size = (f32::from(window.viewport_size().width) * 0.16).clamp(88.0, 150.0);
             div().flex_1().min_h(px(0.0)).w_full().flex().flex_col()
                 .items_center().justify_center().pt(px(64.0)).px(px(24.0)).gap(px(12.0))
@@ -6480,6 +6488,7 @@ mod tests {
             &crate::ai::providers::ProviderConfig::new("gemini", "unused", "test"),
             &[crate::core::domain::Message::user("What did you build?")],
             &crate::ai::engine::TurnContext {
+                conversation_id: None,
                 system: Some(system.clone()),
                 images: vec![],
             },

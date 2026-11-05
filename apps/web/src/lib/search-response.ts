@@ -27,7 +27,9 @@ export const searchResponse = (
   const isServerFunction = new URL(request.url).pathname.startsWith(
     "/_serverFn/"
   );
-  const isAccount = new URL(request.url).pathname === "/account";
+  const isAccount = ["/account", "/workspace"].includes(
+    new URL(request.url).pathname
+  );
   if (!(isError || isServerFunction || noindex || isAccount)) {
     return response;
   }

@@ -13,7 +13,7 @@ use lucide_icons::Icon;
 
 use crate::core::settings::{AutoScreenshot, Settings, ThemeChoice};
 use crate::ui::controls::{
-    action, keycap, row, section, segmented, slider, switch, value_chip, warning,
+    action, keycap, row, section, segmented, slider, slider_enabled, switch, value_chip, warning,
 };
 use crate::ui::dashboard::nav::Route;
 use crate::ui::icons;
@@ -312,24 +312,24 @@ pub fn app_settings(
     .child(row(
         theme,
         "Transparency",
-        "Lower values let the desktop show through",
+        if s.theme == ThemeChoice::Glass { "Glass mode is fully transparent" } else { "Lower values let the desktop show through" },
         div()
             .flex()
             .items_center()
             .gap(px(10.0))
-            .child(slider(
+            .child(slider_enabled(
                 "transparency-slider",
                 theme,
-                s.transparency,
-                0,
-                100,
+                if s.theme == ThemeChoice::Glass { 0 } else { s.transparency },
+                0..=100,
+                s.theme != ThemeChoice::Glass,
                 cx,
                 |view: &mut crate::ui::dashboard::view::DashboardView, new_val, cx| {
                     view.settings_mut().settings.transparency = new_val;
                     view.schedule_settings_save(cx);
                 },
             ))
-            .child(value_chip(theme, &format!("{}%", s.transparency))),
+            .child(value_chip(theme, &format!("{}%", if s.theme == ThemeChoice::Glass { 0 } else { s.transparency }))),
     ))
     .child(row(
         theme,
@@ -362,6 +362,16 @@ pub fn app_settings(
             view.save_settings();
         }),
     )))
+    .child(row(
+        theme,
+        "Show watermark",
+        "Show the Lennette name and description when the overlay is empty",
+        switch("show-watermark", theme, s.show_watermark, cx,
+            |view: &mut crate::ui::dashboard::view::DashboardView, _, _| {
+                view.settings_mut().settings.show_watermark = !view.settings_mut().settings.show_watermark;
+                view.save_settings();
+            }),
+    ))
     .child(row(
         theme,
         "Show borders",

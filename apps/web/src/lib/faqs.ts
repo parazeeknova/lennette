@@ -45,8 +45,8 @@ export const PRICING_FAQS: readonly FaqEntry[] = [
       "Nothing to Lennette. Add your own AI provider key for answers and a Deepgram key for live transcription. Those providers bill you directly for API usage. You do not need a Lennette account.",
   },
   {
-    question: "What will Managed include?",
-    answer: `The planned ${MANAGED_PLAN.price} monthly subscription includes fast models, 2,000 model-weighted AI credits and 10 GB of synced storage across three devices. Managed Plus at $40 includes fast models, 6,000 credits, a higher meeting allowance and 50 GB across six devices. Meeting allowances are being finalized before launch. AI credits vary with the model, context length and generated text; follow-ups use the same allowance. You will not need separate provider keys.`,
+    question: "What does Managed include?",
+    answer: `The ${MANAGED_PLAN.price} monthly subscription includes fast models, 2,000 model-weighted AI credits, 300 minutes of live transcription and 10 GB of synced storage across three devices. Managed Plus at $40 includes fast models, 6,000 credits, 1,200 transcription minutes and 50 GB across six devices. AI credits vary with the model, context length and generated text; follow-ups use the same allowance. You do not need separate provider keys.`,
   },
   {
     question: "Does my audio stay on my device?",
@@ -56,6 +56,6 @@ export const PRICING_FAQS: readonly FaqEntry[] = [
   {
     question: "Can I sign up for Managed now?",
     answer:
-      "Managed access is coming soon. Join the waitlist to hear when it opens. You can download Lennette and use your own keys today.",
+      "Yes. Sign in with Google or GitHub on the account page, choose Managed or Managed Plus, and complete secure checkout with Dodo Payments. You can also download Lennette and use your own provider keys for free.",
   },
 ];

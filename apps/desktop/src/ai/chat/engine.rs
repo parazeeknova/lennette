@@ -38,6 +38,8 @@ pub enum ChatEvent {
 /// Extra context for one turn.
 #[derive(Debug, Clone, Default)]
 pub struct TurnContext {
+    /// Associate only foreground chat turns with the browser companion.
+    pub conversation_id: Option<uuid::Uuid>,
     /// System prompt steering the model.
     pub system: Option<String>,
     /// Base64 PNG attachments, no data-URL prefix.
@@ -285,6 +287,10 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     let mut body = build_body(provider, config, history, context);
     if config.base_url.contains("/v1/chat/completions") && crate::managed::active().is_some() {
         body["max_tokens"] = json!(2048);
+        body["relay_live"] = json!(context.conversation_id.is_some());
+        if let Some(conversation) = context.conversation_id {
+            body["conversation_id"] = json!(conversation);
+        }
         if let Some(meeting) = crate::managed::meeting() {
             body["meeting_id"] = json!(meeting);
         }
@@ -452,6 +458,7 @@ mod tests {
 
     fn context(system: &str) -> TurnContext {
         TurnContext {
+            conversation_id: None,
             system: Some(system.into()),
             images: vec![],
         }
@@ -475,6 +482,7 @@ mod tests {
         let config = ProviderConfig::new("gemini", "k", "gpt-4o");
         let history = [Message::user("what is this")];
         let context = TurnContext {
+            conversation_id: None,
             system: None,
             images: vec!["QUJD".into(), "REVG".into()],
         };
@@ -498,6 +506,7 @@ mod tests {
                 Message::user("look"),
             ],
             &TurnContext {
+                conversation_id: None,
                 system: None,
                 images: vec!["QUJD".into()],
             },

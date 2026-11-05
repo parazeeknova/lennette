@@ -10,7 +10,62 @@ impl MigratorTrait for Migrator {
             Box::new(AccountEvents),
             Box::new(AttachmentRefs),
             Box::new(PlanUpgrades),
+            Box::new(Workspace),
         ]
+    }
+}
+struct Workspace;
+impl MigrationName for Workspace {
+    fn name(&self) -> &str {
+        "m20261105_007_workspace"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for Workspace {
+    fn use_transaction(&self) -> Option<bool> {
+        Some(false)
+    }
+
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        let connection = manager.get_connection();
+        let sql = include_str!("../../migrations/007_workspace.sql")
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            // Names come only from the embedded migration, never external input.
+            let name = statement
+                .split_whitespace()
+                .nth(6)
+                .ok_or_else(|| DbErr::Custom("missing workspace index name".into()))?;
+            let invalid = connection.query_one_raw(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT NOT indisvalid AS invalid FROM pg_index WHERE indexrelid=to_regclass($1)",
+                [name.into()],
+            )).await?.map(|row| row.try_get::<bool>("", "invalid")).transpose()?.unwrap_or(false);
+            if invalid {
+                connection
+                    .execute_unprepared(&format!("DROP INDEX CONCURRENTLY IF EXISTS {name}"))
+                    .await?;
+            }
+            connection.execute_unprepared(statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        for name in [
+            "records_workspace_list",
+            "records_workspace_conversation",
+            "records_workspace_meeting",
+            "attachments_workspace_list",
+        ] {
+            manager
+                .get_connection()
+                .execute_unprepared(&format!("DROP INDEX CONCURRENTLY IF EXISTS {name}"))
+                .await?;
+        }
+        Ok(())
     }
 }
 struct PlanUpgrades;

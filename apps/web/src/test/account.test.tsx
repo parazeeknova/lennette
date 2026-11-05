@@ -192,3 +192,16 @@ it("requires typed confirmation before deleting and handles session expiry", asy
     await screen.findByText("Your session expired. Sign in again.")
   ).toBeInTheDocument();
 });
+
+it("restores the subscription destination after authentication and snapshot loading", async () => {
+  window.history.replaceState(null, "", "/account");
+  sessionStorage.setItem("account-return-hash", "#subscription");
+  const scroll = vi.fn();
+  Element.prototype.scrollIntoView = scroll;
+  render(<AccountPage />);
+  await screen.findByText("Meeting User");
+  await waitFor(() => expect(scroll).toHaveBeenCalled());
+  expect(window.location.hash).toBe("#subscription");
+  expect(sessionStorage.getItem("account-return-hash")).toBeNull();
+  window.history.replaceState(null, "", "/account");
+});

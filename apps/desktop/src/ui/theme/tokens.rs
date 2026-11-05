@@ -102,18 +102,18 @@ impl Theme {
         theme
     }
 
-    /// Glass uses faint neutral fills rather than outlining every nested control.
+    /// Glass leaves the desktop fully visible behind text and controls.
     pub const GLASS: Theme = Theme {
-        background: rgba(0x11, 0x13, 0x18, 0.18),
-        card: rgba(0x16, 0x1b, 0x24, 0.12),
+        background: rgba(0x11, 0x13, 0x18, 0.0),
+        card: rgba(0x16, 0x1b, 0x24, 0.0),
         foreground: rgb_hex(0xf5f5f5),
-        muted: rgba(0xff, 0xff, 0xff, 0.045),
+        muted: rgba(0xff, 0xff, 0xff, 0.0),
         muted_foreground: rgb_hex(0xd0d4dc),
         border: rgba(0xff, 0xff, 0xff, 0.055),
         frame_border: rgba(0xff, 0xff, 0xff, 0.18),
         frame_outer_border: rgba(0x45, 0x48, 0x50, 0.38),
-        input: rgba(0x0c, 0x11, 0x1b, 0.12),
-        accent: rgba(0xff, 0xff, 0xff, 0.09),
+        input: rgba(0x0c, 0x11, 0x1b, 0.0),
+        accent: rgba(0xff, 0xff, 0xff, 0.0),
         primary: rgb_hex(0xf7f7f7),
         destructive: rgb_hex(0xe5837f),
         success: rgb_hex(0x8fd9b0),
@@ -169,10 +169,10 @@ impl Theme {
         self.background.a < 0.2
     }
 
-    /// Cap semantic fills in glass so active/error states remain translucent.
+    /// Keep semantic backgrounds clear in glass while preserving foreground colours.
     pub fn fill(self, colour: Rgba) -> Rgba {
         if self.is_glass() {
-            Self::with_alpha(colour, colour.a.min(0.13))
+            Self::with_alpha(colour, 0.0)
         } else {
             colour
         }
@@ -234,7 +234,7 @@ impl Theme {
     /// otherwise opaque children float over a see-through window.
     pub fn surfaces(self, opacity: f32) -> Surfaces {
         Surfaces {
-            opacity,
+            opacity: if self.is_glass() { 0.0 } else { opacity },
             theme: self,
         }
     }
@@ -264,9 +264,7 @@ pub struct Surfaces {
 impl Surfaces {
     /// Scale a colour's alpha by the window opacity.
     ///
-    /// The glass palette already carries alpha, so this multiplies rather than
-    /// flattening to the window value: a 0.06 card at 50% stays a whisper of
-    /// light instead of becoming an opaque block.
+    /// Multiplying preserves the relative strength of each translucent token.
     fn fade(self, colour: Rgba) -> Rgba {
         if colour.a == 0.0 {
             return colour;
@@ -279,9 +277,11 @@ impl Surfaces {
         }
     }
 
-    /// Surfaces that carry text keep a floor so labels stay readable even when
-    /// the background is fully transparent. Only the page behind them clears.
+    /// Non-glass controls retain a tint floor; glass surfaces stay clear.
     fn fade_readable(self, colour: Rgba) -> Rgba {
+        if self.theme.is_glass() {
+            return Theme::with_alpha(colour, 0.0);
+        }
         if colour.a == 0.0 {
             return colour;
         }
@@ -292,13 +292,19 @@ impl Surfaces {
         }
     }
 
-    /// The page behind everything. This is the only surface that goes fully
-    /// clear at 0%, so the window can sit invisibly over the desktop.
+    /// The page follows the opacity setting, except glass is always clear.
     pub fn background(self) -> Rgba {
-        Theme::with_alpha(self.theme.background, self.opacity)
+        Theme::with_alpha(
+            self.theme.background,
+            if self.theme.is_glass() {
+                0.0
+            } else {
+                self.opacity
+            },
+        )
     }
 
-    /// Glass panels keep a faint tint; other themes retain a legibility floor.
+    /// Glass panels are clear; other themes retain a legibility floor.
     pub fn card(self) -> Rgba {
         self.fade_readable(self.theme.card)
     }
@@ -315,7 +321,7 @@ impl Surfaces {
         self.fade_readable(self.theme.input)
     }
 
-    /// Primary actions use a soft translucent fill in glass.
+    /// Primary actions stay clear in glass.
     pub fn primary(self) -> Rgba {
         if self.theme.is_glass() {
             return self.theme.primary_fill();
@@ -391,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn glass_keeps_soft_fills_subtle_outlines_and_opaque_text() {
+    fn glass_clears_all_fills_at_every_opacity_and_keeps_text_visible() {
         let theme = Theme::GLASS;
         for opacity in [0.0, 0.5, 1.0] {
             let surfaces = theme.surfaces(opacity);
@@ -404,13 +410,13 @@ mod tests {
                 theme.menu_hover(),
                 theme.fill(theme.destructive),
             ] {
-                assert!(colour.a > 0.0 && colour.a <= 0.13);
+                assert_eq!(colour.a, 0.0);
             }
             assert!(surfaces.border().a <= 0.1);
             assert!(theme.control_border(true).a <= 0.12);
             assert!(theme.focus_border().a > 0.0);
-            assert_eq!(surfaces.background().a, opacity);
-            assert!(theme.popover().a > surfaces.card().a);
+            assert_eq!(surfaces.background().a, 0.0);
+            assert_eq!(theme.popover().a, 0.0);
             assert_eq!(theme.primary_foreground(), theme.foreground);
             assert_eq!(theme.foreground.a, 1.0);
         }
@@ -451,8 +457,8 @@ mod tests {
     }
 
     #[test]
-    fn every_palette_fades_surfaces_and_keeps_interactive_edges_quiet() {
-        for theme in [Theme::DARK, Theme::LIGHT, Theme::GLASS] {
+    fn tinted_palettes_fade_surfaces_and_keep_interactive_edges_quiet() {
+        for theme in [Theme::DARK, Theme::LIGHT] {
             let low = theme.surfaces(0.0);
             let high = theme.surfaces(1.0);
             assert_eq!(low.background().a, 0.0);
@@ -468,7 +474,7 @@ mod tests {
 
     #[test]
     fn full_opacity_makes_the_window_opaque() {
-        for theme in [Theme::GLASS, Theme::DARK, Theme::LIGHT] {
+        for theme in [Theme::DARK, Theme::LIGHT] {
             let full = theme.surfaces(1.0);
             assert!((full.card().a - theme.card.a).abs() < 1e-6);
             assert_eq!(full.background().a, 1.0);

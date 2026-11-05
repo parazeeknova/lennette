@@ -12,6 +12,11 @@ const INDEX: &[(Route, &str, &str)] = &[
         "Transparency",
         "opacity transparent window background",
     ),
+    (
+        Route::Settings,
+        "Show watermark",
+        "empty overlay lennette name description branding",
+    ),
     (Route::Settings, "Text size", "font scale readability"),
     (Route::Settings, "Show borders", "outline frame corners"),
     #[cfg(not(windows))]

@@ -359,13 +359,19 @@ it("retries a failed attachment request without leaving its preview", async () =
 });
 
 it("keeps attachments across history pages and pages files independently", async () => {
-  api.mockImplementation((path) => {
+  let releaseHistory: () => void = vi.fn();
+  // Hold the history response until attachment navigation completes.
+  // eslint-disable-next-line promise/avoid-new
+  const historyReady = new Promise<void>((resolve) => {
+    releaseHistory = resolve;
+  });
+  api.mockImplementation(async (path) => {
     if (path === "/me") {
-      return Promise.resolve({
+      return {
         id: account,
         name: "Sam",
         email: "sam@example.test",
-      });
+      };
     }
     const record = {
       id: conversation,
@@ -373,11 +379,14 @@ it("keeps attachments across history pages and pages files independently", async
       data: { title: "File pages" },
     };
     if (!path.startsWith("/workspace/items/")) {
-      return Promise.resolve({ items: [record], next: null });
+      return { items: [record], next: null };
     }
     const params = new URLSearchParams(path.split("?")[1]);
     const filesAfter = params.has("files_after");
-    return Promise.resolve({
+    if (params.has("after")) {
+      await historyReady;
+    }
+    return {
       record,
       items: [],
       extras: [],
@@ -390,7 +399,7 @@ it("keeps attachments across history pages and pages files independently", async
         },
       ],
       files_next: filesAfter ? null : "files-cursor",
-    });
+    };
   });
   const cache = client();
   render(
@@ -427,5 +436,19 @@ it("keeps attachments across history pages and pages files independently", async
   expect(
     api.mock.calls.some(([path]) => path.includes("files_after=files-cursor"))
   ).toBe(true);
+  await act(async () => {
+    releaseHistory();
+    await historyReady;
+  });
+  await waitFor(() =>
+    expect(
+      within(
+        screen.getByRole("navigation", { name: "History pages" })
+      ).getByRole("button", { name: "Newer" })
+    ).toBeEnabled()
+  );
+  expect(
+    screen.getByRole("button", { name: "Second attachment" })
+  ).toBeInTheDocument();
   cache.clear();
 });

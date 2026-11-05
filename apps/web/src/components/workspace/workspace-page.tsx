@@ -49,19 +49,25 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
   const [detailQuery, setDetailQuery] = useState("");
   const { live, status } = useWorkspaceLive(user.id, expired);
   useEffect(() => {
+    if (search === query) {
+      return;
+    }
     const timer = setTimeout(() => {
       setQuery(search);
       setPages([null]);
     }, 250);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, query]);
   useEffect(() => {
+    if (detailSearch === detailQuery) {
+      return;
+    }
     const timer = setTimeout(() => {
       setDetailQuery(detailSearch);
       setDetailPages([null]);
     }, 250);
     return () => clearTimeout(timer);
-  }, [detailSearch]);
+  }, [detailSearch, detailQuery]);
   const list = useQuery({
     queryKey: ["workspace", user.id, "items", kind, query, pages.at(-1)],
     gcTime: 0,
@@ -103,6 +109,10 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
         signal
       );
     },
+    // Preserve independently paged attachments while history loads, without
+    // displaying a previously selected record's content.
+    placeholderData: (previous) =>
+      previous?.record.id === selected?.id ? previous : undefined,
     enabled: selected !== null && selected.kind !== "file",
     retry: false,
   });

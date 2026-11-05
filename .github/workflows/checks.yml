@@ -20,6 +20,19 @@ env:
   RUSTUP_TOOLCHAIN: 1.99.1
 
 jobs:
+  macos-native:
+    name: macOS native smoke (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check native bridge and application metadata
+        run: bash scripts/macos-smoke.sh
+
   checks:
     name: Format, lint and typecheck
     runs-on: ubuntu-latest

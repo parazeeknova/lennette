@@ -3,7 +3,7 @@ type Environment = Record<string, string | undefined>;
 type Transport = (url: string, options?: RequestInit) => Promise<Response>;
 type Application = { dockerImage?: string; appName: string; serverId?: string };
 type Deployment = { title: string; status: string };
-type Container = { name: string; state: string; image: string };
+type Container = { containerId: string; name: string; state: string };
 
 export async function deploy(
   env: Environment,
@@ -65,12 +65,23 @@ export async function deploy(
     const server = current.serverId ? `?serverId=${encodeURIComponent(current.serverId)}` : "";
     for (let attempt = 0; attempt < 30; attempt++) {
       const containers = await api<Container[]>(`docker.getContainers${server}`);
-      const running = containers.some(
-        (container) =>
-          container.name.startsWith(`${current.appName}.`) &&
-          container.state === "running" &&
-          container.image === image,
-      );
+      let running = false;
+      for (const container of containers.filter(
+        (item) => item.name.startsWith(`${current.appName}.`) && item.state === "running",
+      )) {
+        const params = new URLSearchParams({ containerId: container.containerId });
+        if (current.serverId) params.set("serverId", current.serverId);
+        // Dokploy's list strips digests for display. Inspect Docker's requested
+        // image to verify the release, including health after a Swarm update.
+        const config = await api<{
+          Config: { Image: string };
+          State: { Health?: { Status: string } };
+        }>(`docker.getConfig?${params}`);
+        if (config.Config.Image === image && config.State.Health?.Status === "healthy") {
+          running = true;
+          break;
+        }
+      }
       if (running) {
         try {
           const response = await transport(health, {

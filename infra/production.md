@@ -87,7 +87,7 @@ cargo test --locked -p lennette-server --test integration -- --ignored
 For cloud integration tests, set `TEST_DATABASE_URL` to a disposable Neon branch,
 `TEST_DATABASE_URL_UNPOOLED` to that branch's direct URL, and `TEST_REDIS_URL` to
 the TLS Redis URL. Never run fixture tests against production PostgreSQL.
-The validation branch created during setup expires automatically.
+The temporary validation branch was deleted after cloud integration tests passed.
 
 Neon setup installs its Codex plugin and adds `neon.ts`; `.neon` and `.env.local`
 remain ignored. `neon deploy` reconciles PostgreSQL configuration and pulls its

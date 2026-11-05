@@ -55,10 +55,16 @@ describe("production deployment gates", () => {
         return json([
           {
             name: "lennette.1.task",
+            containerId: "test-container",
             state: "running",
-            image: ++containers === 1 ? "previous-image" : image,
+            image: "ghcr.io/parazeeknova/lennette-api",
           },
         ]);
+      if (url.includes("docker.getConfig"))
+        return json({
+          Config: { Image: ++containers === 1 ? "previous-image" : image },
+          State: { Health: { Status: "healthy" } },
+        });
       if (url === env.API_HEALTH_URL) {
         healthCalls++;
         return new Response(null, { status: 204 });

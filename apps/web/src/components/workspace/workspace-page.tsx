@@ -140,15 +140,6 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
           <img src="/lennette.png" alt="" width={34} height={24} />
           lennette
         </Link>
-        <output
-          aria-live="polite"
-          className="flex items-center gap-2 text-xs font-medium text-ink-soft"
-        >
-          <span
-            className={`size-2 rounded-full ${status === "Live" ? "bg-emerald-600" : "bg-amber-600"}`}
-          />
-          {status === "Live" ? "Workspace connected" : status}
-        </output>
         <Link to="/account" className={button}>
           <Settings className="size-4" />
           <span className="hidden sm:inline">{user.name || "Account"}</span>
@@ -157,9 +148,6 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
       </header>
       <div className="grid min-h-[calc(100dvh-8rem)] gap-3 lg:grid-cols-[190px_285px_minmax(0,1fr)]">
         <aside className="flex min-w-0 flex-col lg:py-4">
-          <h1 className="sr-only mb-4 px-4 font-display text-2xl lg:not-sr-only">
-            Workspace
-          </h1>
           <nav
             aria-label="Workspace"
             className="flex gap-2 overflow-x-auto pb-2 lg:flex-col"
@@ -192,12 +180,16 @@ const Workspace = ({ user, expired }: { user: User; expired: () => void }) => {
               </button>
             ))}
           </nav>
-          <p className="mt-auto hidden px-4 pt-8 text-xs leading-6 text-ink-soft lg:block">
-            Your private companion.
-            <br />
-            Open Lennette on your desktop and enable account sync to bring your
-            history here.
-          </p>
+          <output
+            aria-live="polite"
+            className="glass mt-3 flex items-center gap-2.5 self-start rounded-2xl px-3 py-3 text-xs leading-5 font-medium text-ink-soft lg:mt-auto lg:self-stretch"
+          >
+            <span
+              aria-hidden="true"
+              className={`size-2 shrink-0 rounded-full ring-4 ${status === "Live" ? "bg-emerald-600 ring-emerald-600/10" : "bg-amber-600 ring-amber-600/10"}`}
+            />
+            <span>{status === "Live" ? "Workspace connected" : status}</span>
+          </output>
         </aside>
         <ListPane
           kind={kind}

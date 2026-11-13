@@ -20,6 +20,7 @@ pub use attachments::cache_attachment;
 static CLIENT: RwLock<Option<Client>> = RwLock::new(None);
 static DATABASE: OnceLock<PathBuf> = OnceLock::new();
 static STATUS: Mutex<String> = Mutex::new(String::new());
+static PROVIDER_SWITCH: Mutex<Option<(String, String)>> = Mutex::new(None);
 static MEETING: Mutex<Option<(Uuid, f64)>> = Mutex::new(None);
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 static STARTED: OnceLock<()> = OnceLock::new();
@@ -31,6 +32,12 @@ fn stored_client() -> Option<Client> {
 }
 pub fn status() -> String {
     STATUS.lock().unwrap().clone()
+}
+pub(crate) fn provider_switched(model: String, name: String) {
+    *PROVIDER_SWITCH.lock().unwrap() = Some((model, name));
+}
+pub(crate) fn take_provider_switch() -> Option<(String, String)> {
+    PROVIDER_SWITCH.lock().unwrap().take()
 }
 fn message(value: impl Into<String>) {
     *STATUS.lock().unwrap() = value.into()
@@ -326,9 +333,8 @@ pub fn chat_config() -> Option<crate::ai::providers::ProviderConfig> {
                 .ok()
                 .flatten()
         })
-        .unwrap_or_else(|| "openai/gpt-6-luna".into());
-    let mut config =
-        crate::ai::providers::ProviderConfig::new("merge-gateway", "managed-session", model);
+        .unwrap_or_else(|| "gemini-3.5-flash-lite".into());
+    let mut config = crate::ai::providers::ProviderConfig::new("gemini", "managed-session", model);
     config.base_url = client.url("/v1/chat/completions").ok()?.to_string();
     Some(config)
 }

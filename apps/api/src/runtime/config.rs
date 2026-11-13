@@ -31,8 +31,10 @@ pub struct Config {
     pub redis_url: SecretString,
     pub google: Option<OAuthConfig>,
     pub github: Option<OAuthConfig>,
-    pub merge_key: SecretString,
-    pub merge_url: Url,
+    pub gemini_key: SecretString,
+    pub gemini_url: Url,
+    pub deepseek_key: SecretString,
+    pub deepseek_url: Url,
     pub deepgram_key: SecretString,
     pub deepgram_url: Url,
     pub dodo_key: SecretString,
@@ -86,13 +88,15 @@ impl Config {
             )?),
             google: oauth("GOOGLE"),
             github: oauth("GITHUB"),
-            merge_key: secret("MERGE_API_KEY"),
-            merge_url: get(
-                "MERGE_API_URL",
-                "https://api-gateway.merge.dev/v1/chat/completions",
+            gemini_key: secret("GEMINI_API_KEY"),
+            gemini_url: get(
+                "GEMINI_API_URL",
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             )
             .parse()?,
             deepgram_key: secret("DEEPGRAM_API_KEY"),
+            deepseek_key: secret("DEEPSEEK_API_KEY"),
+            deepseek_url: get("DEEPSEEK_API_URL", "https://parazeeknova--ep-deepseek-v4-1-flash-1017-server.us-west.modal.direct/v1/chat/completions").parse()?,
             deepgram_url: get("DEEPGRAM_API_URL", "wss://api.deepgram.com/v1/listen").parse()?,
             dodo_key: secret("DODO_API_KEY"),
             dodo_webhook_secret: secret("DODO_WEBHOOK_SECRET"),
@@ -162,7 +166,8 @@ impl Config {
         for url in [
             &config.public_url,
             &config.website_url,
-            &config.merge_url,
+            &config.gemini_url,
+            &config.deepseek_url,
             &config.dodo_url,
         ] {
             anyhow::ensure!(

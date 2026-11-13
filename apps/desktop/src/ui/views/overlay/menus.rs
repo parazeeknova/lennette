@@ -117,7 +117,28 @@ impl Overlay {
                         .child(icons::model_icon(&theme, &provider, &model, 16.0))
                         .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
                         .child(if provider == crate::managed::catalog::PROVIDER {
-                            lennette_badge(&theme).into_any_element()
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(5.0))
+                                .child(
+                                    div()
+                                        .id(("managed-model-weight", index))
+                                        .tooltip(move |_, cx| cx.new(|_| super::HoverLabel {
+                                            text: "Relative token rates versus Flash-Lite. Credits depend on context, answer length and thinking tokens.".into(), theme,
+                                        }).into())
+                                        .text_size(scaled(10.0))
+                                        .text_color(theme.muted_foreground)
+                                        .child(format!(
+                                            "{}×",
+                                            self.managed_model_weights
+                                                .get(&model)
+                                                .copied()
+                                                .unwrap_or(1)
+                                        )),
+                                )
+                                .child(lennette_badge(&theme))
+                                .into_any_element()
                         } else {
                             div()
                                 .max_w(px(85.0))
@@ -192,6 +213,7 @@ impl Overlay {
                         }).into())
                         .child(icons::model_icon(&theme, crate::managed::catalog::PROVIDER, &model.id, 16.0))
                         .child(div().flex_1().min_w(px(0.0)).truncate().child(label))
+                        .child(format!("{}×", model.multiplier))
                         .child(lennette_badge(&theme))
                         .child(icons::icon(&theme, Icon::LockKeyhole, 12.0)));
                 }

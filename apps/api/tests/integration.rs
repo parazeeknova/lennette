@@ -79,8 +79,10 @@ async fn fixture_in_schema(
         ),
         google: None,
         github: None,
-        merge_key: empty(),
-        merge_url: "http://127.0.0.1:1/chat".parse().unwrap(),
+        gemini_key: empty(),
+        gemini_url: "http://127.0.0.1:1/chat".parse().unwrap(),
+        deepseek_key: empty(),
+        deepseek_url: "http://127.0.0.1:1/chat".parse().unwrap(),
         deepgram_key: empty(),
         deepgram_url: "ws://127.0.0.1:1/listen".parse().unwrap(),
         dodo_key: empty(),
@@ -498,7 +500,7 @@ async fn secrets_and_unconfigured_providers_fail_closed() {
         .0,
         StatusCode::BAD_REQUEST
     );
-    let body = json!({"model":"openai/gpt-6-luna","messages":[{"role":"user","content":"hello"}],"stream":true});
+    let body = json!({"model":"gemini-3.5-flash-lite","messages":[{"role":"user","content":"hello"}],"stream":true});
     assert_eq!(
         request(
             &app,

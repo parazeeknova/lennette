@@ -147,7 +147,7 @@ export const PRIVACY: LegalDocument = {
       title: "Audio and AI processing",
       paragraphs: [
         "Live transcription streams audio to the speech provider, directly in BYOK mode or through the managed backend. Lennette does not retain raw meeting audio as part of its managed storage. Text transcripts and derived content can be saved locally or synced as described above. A speech provider’s own processing and retention rules still apply.",
-        "AI requests send the relevant conversation context, prompts, and selected attachment content to the configured AI service. Managed chat uses Merge Gateway and its downstream AI providers; managed speech uses Deepgram with its model-improvement opt-out setting. Provider selection may change as the service evolves.",
+        "AI requests send the relevant conversation context, prompts, and selected attachment content to the configured AI service. Managed chat uses Google Gemini and a hosted DeepSeek service on Modal, with automatic failover between them; managed speech uses Deepgram with its model-improvement opt-out setting. Provider selection may change as the service evolves.",
         "Lennette does not use your meeting content to train its own AI models. Third-party processing, retention, and training commitments depend on the provider, service agreement, and settings involved; BYOK users should review their chosen providers’ policies.",
       ],
     },
@@ -163,7 +163,7 @@ export const PRIVACY: LegalDocument = {
       id: "service-providers",
       title: "Providers and sharing",
       paragraphs: [
-        "We share information with service providers only as needed for their role: Google or GitHub for sign-in; Dodo Payments for checkout, subscriptions, taxes, and payment compliance; Cloudflare for website delivery, security, and R2 storage; Merge Gateway and downstream AI providers for managed AI; Deepgram for managed transcription; and Resend for waitlist and service emails. Our hosting, malware-scanning, and monitoring infrastructure also processes information needed to operate the service.",
+        "We share information with service providers only as needed for their role: Google or GitHub for sign-in; Dodo Payments for checkout, subscriptions, taxes, and payment compliance; Cloudflare for website delivery, security, and R2 storage; Google Gemini and our hosted DeepSeek service on Modal for managed AI; Deepgram for managed transcription; and Resend for waitlist and service emails. Our hosting, malware-scanning, and monitoring infrastructure also processes information needed to operate the service.",
         "These providers may process information in countries different from where you live. Their applicable privacy notices, contracts, and transfer arrangements govern their handling of information. Contact us for information about the providers and arrangements relevant to your use.",
         "We do not sell your personal information or share meeting content for third-party advertising. We may disclose information when legally required, to protect people or the service, or as part of a business transfer subject to appropriate notice and applicable protections.",
       ],

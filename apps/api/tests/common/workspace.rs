@@ -499,8 +499,8 @@ async fn workspace_chat_stream_uses_real_provider_frames_and_hides_background_tu
     }));
     let (provider_url, provider_task) = scenarios::serve(provider).await;
     let mut config = state.config.clone();
-    config.merge_key = SecretString::from("mock-key");
-    config.merge_url = format!("{provider_url}/chat").parse().unwrap();
+    config.gemini_key = SecretString::from("mock-key");
+    config.gemini_url = format!("{provider_url}/chat").parse().unwrap();
     let state = scenarios::configured(&state, config);
     let app = routes::router(state.clone());
     let (base, server) = scenarios::serve(app.clone()).await;
@@ -510,7 +510,7 @@ async fn workspace_chat_stream_uses_real_provider_frames_and_hides_background_tu
         .unwrap();
     event(&mut socket, "ready").await;
     let conversation = Uuid::new_v4();
-    let mut body = json!({"model":"openai/gpt-6-luna","messages":[{"role":"user","content":"Question?"}],"max_tokens":16,"conversation_id":conversation,"relay_live":true});
+    let mut body = json!({"model":"gemini-3.5-flash-lite","messages":[{"role":"user","content":"Question?"}],"max_tokens":16,"conversation_id":conversation,"relay_live":true});
     assert_eq!(
         request(
             &app,

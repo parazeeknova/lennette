@@ -107,6 +107,60 @@ afterEach(() => {
 });
 
 describe("workspace live state", () => {
+  it("preserves partial answers and shows provider failover while more text arrives", () => {
+    let state = applyLive(
+      emptyLive(),
+      frame({
+        type: "ai_start",
+        stream_id: "switch-test",
+        conversation_id: conversation,
+        prompt: "hello",
+      })
+    );
+    state = applyLive(
+      state,
+      frame({
+        type: "ai_delta",
+        stream_id: "switch-test",
+        conversation_id: conversation,
+        delta: "Hello ",
+        offset: 0,
+      })
+    );
+    state = applyLive(
+      state,
+      frame({
+        type: "ai_provider_switch",
+        stream_id: "switch-test",
+        conversation_id: conversation,
+        name: "DeepSeek V4.1 Flash",
+      })
+    );
+    state = applyLive(
+      state,
+      frame({
+        type: "ai_delta",
+        stream_id: "switch-test",
+        conversation_id: conversation,
+        delta: "world",
+        offset: 6,
+      })
+    );
+    state = applyLive(
+      state,
+      frame({
+        type: "ai_done",
+        stream_id: "switch-test",
+        conversation_id: conversation,
+        complete: true,
+        total_bytes: 11,
+      })
+    );
+    expect(state.answers[0]?.content).toBe("Hello world");
+    expect(state.answers[0]?.providerNotice).toContain("DeepSeek V4.1 Flash");
+    expect(state.answers[0]?.complete).toBe(true);
+    expect(state.answers[0]?.truncated).toBe(false);
+  });
   it("replaces interim speech and never downgrades a final segment", () => {
     let state = applyLive(emptyLive(), speech("Hel", false));
     state = applyLive(state, speech("Hello", true));

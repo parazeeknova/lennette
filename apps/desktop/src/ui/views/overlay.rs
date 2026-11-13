@@ -336,6 +336,7 @@ pub struct Overlay {
     configuration_version: Option<(i64, Option<std::time::SystemTime>, u64)>,
     managed_session: Option<lennette_sync_client::Client>,
     managed_model_labels: std::collections::HashMap<String, String>,
+    managed_model_weights: std::collections::HashMap<String, u32>,
     locked_models: Vec<crate::managed::catalog::Model>,
     mode: Mode,
     size: OverlaySize,
@@ -433,6 +434,7 @@ pub struct Overlay {
     chat: crate::features::chat_session::ChatSession,
     /// Why the last send failed.
     chat_error: Option<String>,
+    provider_notice: Option<String>,
     /// Utterances waiting to be transcribed.
     pending_audio: Vec<Vec<f32>>,
     live_connected: bool,
@@ -618,6 +620,7 @@ impl Overlay {
             configuration_version: None,
             managed_session: None,
             managed_model_labels: std::collections::HashMap::new(),
+            managed_model_weights: std::collections::HashMap::new(),
             locked_models: Vec::new(),
             mode: Mode::default(),
             size: OverlaySize::default(),
@@ -691,6 +694,7 @@ impl Overlay {
             speech: None,
             chat: crate::features::chat_session::ChatSession::new(),
             chat_error: None,
+            provider_notice: None,
             pending_audio: Vec::new(),
             live_connected: false,
             live_interim: Default::default(),
@@ -1350,6 +1354,7 @@ impl Overlay {
             self.capture_task.is_some() && !self.capture_sending && !self.capture_interval;
         self.interrupt_response();
         self.chat_error = None;
+        self.provider_notice = None;
         let settings = crate::features::settings::Settings::load_from_path(
             self.services.database_path.as_deref(),
         )
@@ -2129,6 +2134,7 @@ impl Overlay {
         self.message_list_state.reset(0);
         self.user_scrolled = false;
         // Transcript and live speech belong to the session that just ended.
+        self.provider_notice = None;
         self.transcript.clear();
         self.transcript_collapsed = None;
         self.live_interim = Default::default();
@@ -3020,6 +3026,19 @@ impl Overlay {
 
     /// Sync settings (theme and transparency) in real-time.
     pub fn sync_settings(&mut self) -> bool {
+        let provider_changed = if let Some((model, name)) = crate::managed::take_provider_switch() {
+            if crate::managed::active().is_some() {
+                self.model = Some(model.clone());
+                self.provider_notice =
+                    Some(format!("Switched to {name} to keep the answer going."));
+                self.persist_managed_model(&model);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let session = crate::managed::active();
         let account_changed = match (&self.managed_session, &session) {
             (None, None) => false,
@@ -3034,12 +3053,14 @@ impl Overlay {
             self.catalog_choices.clear();
             self.catalog_status = None;
             self.managed_model_labels.clear();
+            self.managed_model_weights.clear();
+            self.provider_notice = None;
             self.locked_models.clear();
             self.model_provider = None;
             self.model = None;
         }
         if !account_changed && self.refreshed_at.elapsed() < std::time::Duration::from_secs(1) {
-            return false;
+            return provider_changed;
         }
         // SQLite data_version changes when another connection commits. An idle
         // overlay should not reopen/migrate the DB and decrypt both vault lists
@@ -3062,7 +3083,7 @@ impl Overlay {
                 );
                 if self.configuration_version.as_ref() == Some(&signature) {
                     self.refreshed_at = std::time::Instant::now();
-                    return false;
+                    return provider_changed;
                 }
                 self.configuration_version = Some(signature);
             }
@@ -3104,7 +3125,8 @@ impl Overlay {
             self.settings_theme = settings.theme;
             self.theme = Theme::from_settings(&settings);
         }
-        account_changed
+        provider_changed
+            || account_changed
             || before
                 != (
                     self.opacity,
@@ -3338,7 +3360,15 @@ impl Overlay {
             );
         }
 
-        None
+        self.provider_notice.as_ref().map(|notice| {
+            div()
+                .mx(px(space::MD))
+                .py(px(space::SM))
+                .text_size(scaled(11.0))
+                .text_color(theme.muted_foreground)
+                .child(notice.clone())
+                .into_any_element()
+        })
     }
 
     /// Whether the transcript shares the panel above the answers.
@@ -4151,6 +4181,10 @@ impl Overlay {
         self.catalog_choices = models
             .iter()
             .map(|m| (provider.clone(), m.id.clone()))
+            .collect();
+        self.managed_model_weights = models
+            .iter()
+            .map(|m| (m.id.clone(), m.multiplier))
             .collect();
         self.managed_model_labels = models.into_iter().map(|m| (m.id, m.name)).collect();
         self.chat_choices = self.catalog_choices.clone();
@@ -7248,6 +7282,7 @@ mod tests {
             Some(crate::managed::catalog::PROVIDER)
         );
         assert_eq!(overlay.managed_model_labels["balanced"], "Balanced");
+        assert_eq!(overlay.managed_model_weights["balanced"], 2);
         overlay.select_model("balanced");
         overlay.apply_managed_models(models());
         assert_eq!(overlay.model.as_deref(), Some("balanced"));

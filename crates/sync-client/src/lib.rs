@@ -146,6 +146,17 @@ impl Client {
     }
 
     async fn token(&self, rejected: Option<&str>) -> Result<String> {
+        // Dropping an AI/speech request must not drop refresh after the server
+        // rotates its credentials. A detached task completes and persists that
+        // rotation even when its original caller stops waiting.
+        let client = self.clone();
+        let rejected = rejected.map(str::to_owned);
+        tokio::spawn(async move { client.token_inner(rejected.as_deref()).await })
+            .await
+            .map_err(|_| Error::Protocol("login refresh task failed".into()))?
+    }
+
+    async fn token_inner(&self, rejected: Option<&str>) -> Result<String> {
         if self.is_revoked() {
             return Err(Error::SessionRevoked);
         }
@@ -156,13 +167,7 @@ impl Client {
         if session.expires_at <= now() + 60
             || rejected == Some(session.tokens.access_token.as_str())
         {
-            let response = self
-                .http
-                .post(self.url("/v1/auth/refresh")?)
-                .json(&serde_json::json!({"refresh_token":session.tokens.refresh_token}))
-                .send()
-                .await?;
-            let tokens: protocol::Tokens = self.checked(response).await?.json().await?;
+            let tokens = self.refresh_tokens(&session.tokens.refresh_token).await?;
             if self.is_revoked() {
                 return Err(Error::SessionRevoked);
             }
@@ -177,6 +182,30 @@ impl Client {
             self.persist_locked(&session)?;
         }
         Ok(session.tokens.access_token.clone())
+    }
+
+    async fn refresh_tokens(&self, refresh: &str) -> Result<protocol::Tokens> {
+        // Retry a lost response within the server's idempotent rotation window.
+        // HTTP failures (especially a rejected refresh token) are never retried.
+        for attempt in 0..2 {
+            let response = self
+                .http
+                .post(self.url("/v1/auth/refresh")?)
+                .timeout(Duration::from_secs(20))
+                .json(&serde_json::json!({"refresh_token":refresh}))
+                .send()
+                .await;
+            match response {
+                Ok(response) => match self.checked(response).await?.json().await {
+                    Ok(tokens) => return Ok(tokens),
+                    Err(_) if attempt == 0 => continue,
+                    Err(error) => return Err(error.into()),
+                },
+                Err(_) if attempt == 0 => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        unreachable!("the second refresh attempt returns a result")
     }
 
     /// Retry an authenticated HTTP request once after a stale access token.
@@ -395,6 +424,107 @@ mod session_tests {
     use super::*;
     use std::sync::Mutex as StdMutex;
 
+    async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let n = socket.read(&mut buffer).await.unwrap();
+            assert!(n > 0);
+            request.extend_from_slice(&buffer[..n]);
+            if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..end]);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                if request.len() >= end + 4 + length {
+                    break;
+                }
+            }
+        }
+        String::from_utf8(request).unwrap()
+    }
+
+    #[tokio::test]
+    async fn cancelling_the_request_during_refresh_still_persists_the_rotation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (started, start) = tokio::sync::oneshot::channel();
+        let (release, released) = tokio::sync::oneshot::channel();
+        let (persisted, saved) = tokio::sync::oneshot::channel();
+        let persisted = StdMutex::new(Some(persisted));
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            assert!(
+                read_request(&mut socket)
+                    .await
+                    .starts_with("POST /v1/auth/refresh ")
+            );
+            started.send(()).unwrap();
+            released.await.unwrap();
+            let body = serde_json::to_string(&tokens("new-access", "new-refresh")).unwrap();
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let client = Client::restore(SavedSession {
+            api_url: base,
+            expires_at: 0,
+            tokens: tokens("old-access", "old-refresh"),
+        })
+        .unwrap()
+        .with_persistence(move |session| {
+            assert_eq!(session.tokens.refresh_token, "new-refresh");
+            if let Some(sender) = persisted.lock().unwrap().take() {
+                let _ = sender.send(());
+            }
+            Ok(())
+        });
+        let caller = client.clone();
+        let request = tokio::spawn(async move { caller.access_token().await });
+        start.await.unwrap();
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), saved)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(client.access_token().await.unwrap(), "new-access");
+        assert!(!client.is_revoked());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn lost_refresh_response_is_retried_without_forgetting_the_login() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for attempt in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut socket).await;
+                assert!(request.contains("old-refresh"));
+                if attempt == 0 {
+                    drop(socket);
+                    continue;
+                }
+                let body = serde_json::to_string(&tokens("new-access", "new-refresh")).unwrap();
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let client = Client::restore(SavedSession {
+            api_url: base,
+            expires_at: 0,
+            tokens: tokens("old-access", "old-refresh"),
+        })
+        .unwrap();
+        assert_eq!(client.access_token().await.unwrap(), "new-access");
+        assert!(!client.is_revoked());
+        server.await.unwrap();
+    }
+
     async fn fixture(
         expired: bool,
         replies: Vec<(&'static str, u16, Value)>,
@@ -404,28 +534,7 @@ mod session_tests {
         let server = tokio::spawn(async move {
             for (path, status, body) in replies {
                 let (mut socket, _) = listener.accept().await.unwrap();
-                let mut request = Vec::new();
-                let mut buffer = [0u8; 4096];
-                loop {
-                    let n = socket.read(&mut buffer).await.unwrap();
-                    assert!(n > 0);
-                    request.extend_from_slice(&buffer[..n]);
-                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                        let headers = String::from_utf8_lossy(&request[..end]);
-                        let length = headers
-                            .lines()
-                            .find_map(|line| {
-                                line.to_ascii_lowercase()
-                                    .strip_prefix("content-length:")
-                                    .and_then(|v| v.trim().parse::<usize>().ok())
-                            })
-                            .unwrap_or(0);
-                        if request.len() >= end + 4 + length {
-                            break;
-                        }
-                    }
-                }
-                let request = String::from_utf8_lossy(&request);
+                let request = read_request(&mut socket).await;
                 assert_eq!(
                     request.lines().next().unwrap().split_whitespace().nth(1),
                     Some(path)

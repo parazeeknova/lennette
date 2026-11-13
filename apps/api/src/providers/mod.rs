@@ -86,7 +86,9 @@ fn validate_messages(messages: &[ChatMessage]) -> Result<i64> {
                                 .map_err(|_| {
                                 ApiError::BadRequest("invalid image encoding".into())
                             })?;
-                            if bytes.len() > 512 * 1024 || !valid_image_dimensions(&bytes) {
+                            if bytes.len() > lennette_protocol::MAX_CHAT_IMAGE_BYTES
+                                || !valid_image_dimensions(&bytes)
+                            {
                                 return Err(ApiError::BadRequest(
                                     "image must be at most 1024×1024 and 512 KiB".into(),
                                 ));
@@ -114,7 +116,10 @@ fn valid_image_dimensions(bytes: &[u8]) -> bool {
     }
     let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
     let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
-    width > 0 && height > 0 && width <= 1024 && height <= 1024
+    width > 0
+        && height > 0
+        && width <= lennette_protocol::MAX_CHAT_IMAGE_EDGE
+        && height <= lennette_protocol::MAX_CHAT_IMAGE_EDGE
 }
 async fn own_meeting(state: &AppState, p: &Principal, id: Option<Uuid>) -> Result<()> {
     if let Some(id) = id {

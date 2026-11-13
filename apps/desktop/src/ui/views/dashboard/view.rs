@@ -1081,7 +1081,7 @@ impl DashboardView {
             .unwrap_or_else(|| "Conversation".to_owned());
 
         let mut markdown = format!("# {title}\n\n");
-        for record in records {
+        for record in records.into_iter().filter(|record| !record.context_only) {
             let who = if record.role == "user" {
                 "You"
             } else {

@@ -7309,6 +7309,115 @@ mod tests {
         std::fs::remove_dir_all(path).unwrap();
     }
 
+    #[tokio::test]
+    async fn managed_request_without_picker_validates_saved_model_and_applies_switch_notice() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (path, mut overlay) = fixture();
+        let db_path = path.join("managed-request.db");
+        let db = crate::db::Database::open(&db_path).unwrap();
+        crate::db::settings::set(db.connection(), "chat_model", "openai/gpt-6-luna").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let (headers, end, length) = loop {
+                    let mut chunk = [0u8; 4096];
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..end]).into_owned();
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length: ")
+                                    .and_then(|n| n.parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if bytes.len() >= end + 4 + length {
+                            break (headers, end + 4, length);
+                        }
+                    }
+                };
+                assert!(
+                    headers
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer substituted-access-token")
+                );
+                let (kind, body) = if headers.starts_with("GET /v1/catalog ") {
+                    (
+                        "application/json",
+                        r#"{"models":[{"id":"gemini-3.5-flash-lite","name":"Flash-Lite","multiplier":1,"plus_only":false},{"id":"deepseek-ai/DeepSeek-V4.1-Flash-1017","name":"DeepSeek","multiplier":1,"plus_only":false}]}"#,
+                    )
+                } else if headers.starts_with("GET /v1/billing/usage ") {
+                    ("application/json", r#"{"limits":{"id":"managed"}}"#)
+                } else {
+                    assert!(headers.starts_with("POST /v1/chat/completions "));
+                    let body: serde_json::Value =
+                        serde_json::from_slice(&bytes[end..end + length]).unwrap();
+                    assert_eq!(body["model"], "gemini-3.5-flash-lite");
+                    (
+                        "text/event-stream",
+                        "data: {\"lennette\":{\"type\":\"ai_provider_switch\",\"model\":\"deepseek-ai/DeepSeek-V4.1-Flash-1017\",\"name\":\"DeepSeek\"}}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n",
+                    )
+                };
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let client = lennette_sync_client::Client::restore(lennette_sync_client::SavedSession {
+            api_url: base,
+            expires_at: lennette_sync_client::now() + 3600,
+            tokens: lennette_sync_client::protocol::Tokens {
+                access_token: "substituted-access-token".into(),
+                refresh_token: "test-refresh".into(),
+                expires_in: 3600,
+                account_id: uuid::Uuid::new_v4(),
+            },
+        })
+        .unwrap();
+        let _session = crate::managed::testing::session(client.clone(), db_path);
+        overlay.database = Some(std::rc::Rc::new(db));
+        overlay.managed_session = Some(client);
+        overlay.model_provider = Some(crate::managed::catalog::PROVIDER.into());
+        let config = crate::managed::chat_config().unwrap();
+        assert_eq!(config.model, "gemini-3.5-flash-lite");
+        let (_cancel, rx) = tokio::sync::watch::channel(false);
+        let answer = crate::features::chat_engine::stream_chat_bounded(
+            &crate::features::chat_engine::http_client(),
+            &config,
+            &[crate::core::domain::Message::user("hello")],
+            &crate::features::chat_engine::TurnContext::default(),
+            std::sync::Arc::new(rx),
+            |_| std::future::ready(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer, "Hello");
+        assert!(!overlay.model_menu_open);
+        overlay.sync_settings();
+        assert_eq!(
+            overlay.model.as_deref(),
+            Some("deepseek-ai/DeepSeek-V4.1-Flash-1017")
+        );
+        assert!(
+            overlay
+                .provider_notice
+                .as_deref()
+                .unwrap()
+                .contains("DeepSeek")
+        );
+        assert_eq!(
+            crate::managed::chat_config().unwrap().model,
+            "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+        );
+        server.await.unwrap();
+        drop(overlay);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
     #[test]
     fn selected_provider_and_model_back_the_actual_chat_request() {
         let (path, mut overlay) = fixture();

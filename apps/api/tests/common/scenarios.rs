@@ -600,6 +600,122 @@ async fn managed_failover_switches_both_directions_and_continues_partial_answers
     }
 }
 
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn cancelled_continuations_settle_during_reserve_send_and_switch_yield() {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    for stage in ["reserve", "send", "switch"] {
+        let schema = format!("storage_test_cancel_{}", Uuid::new_v4().simple());
+        let (state, _, id, t) = fixture_in_schema(Some(schema)).await;
+        subscribe(&state, id).await;
+        let lock_id = (Uuid::new_v4().as_u128() % 100_000_000 + 1) as i64;
+        let gate = if stage == "reserve" {
+            state.db.execute_unprepared(&format!("CREATE FUNCTION pause_continuation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.amount=87 THEN PERFORM pg_advisory_xact_lock({lock_id}); END IF; RETURN NEW; END $$; CREATE TRIGGER pause_continuation BEFORE INSERT ON reservations FOR EACH ROW EXECUTE FUNCTION pause_continuation();")).await.unwrap();
+            let tx = state.db.begin().await.unwrap();
+            tx.execute_unprepared(&format!("SELECT pg_advisory_xact_lock({lock_id})"))
+                .await
+                .unwrap();
+            Some(tx)
+        } else {
+            None
+        };
+        let sending = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let switched = Arc::new(tokio::sync::Notify::new());
+        let (signal, unblock) = (sending.clone(), release.clone());
+        let providers=Router::new()
+            .route("/primary",post(||async {
+                ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,\"total_tokens\":22}}\n\n")
+            }))
+            .route("/backup",post(move || {let (signal,unblock)=(signal.clone(),unblock.clone());async move {
+                signal.notify_one();
+                if stage=="send" {unblock.notified().await;}
+                ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\ndata: [DONE]\n\n")
+            }}));
+        let (base, server) = serve(providers).await;
+        let mut config = state.config.clone();
+        config.gemini_key = SecretString::from("primary-key");
+        config.deepseek_key = SecretString::from("backup-key");
+        config.gemini_url = format!("{base}/primary").parse().unwrap();
+        config.deepseek_url = format!("{base}/backup").parse().unwrap();
+        let state = configured(&state, config);
+        let app = routes::router(state.clone());
+        let response=app.oneshot(Request::builder().method("POST").uri("/v1/chat/completions")
+            .header("authorization",format!("Bearer {}",t.access_token)).header("content-type","application/json")
+            .body(Body::from(json!({"model":"gemini-3.5-flash-lite","messages":[{"role":"user","content":"hello"}],"max_tokens":16,"relay_live":false}).to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let noticed = switched.clone();
+        let driver = tokio::spawn(async move {
+            let mut stream = response.into_body().into_data_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.unwrap();
+                if String::from_utf8_lossy(&chunk).contains("ai_provider_switch") {
+                    noticed.notify_one();
+                    std::future::pending::<()>().await;
+                }
+            }
+        });
+        tokio::time::timeout(StdDuration::from_secs(10),async {
+            if stage=="reserve" {
+                loop {
+                    let row=state.db.query_one_raw(sea_orm::Statement::from_string(sea_orm::DbBackend::Postgres,format!("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND objid={lock_id} AND NOT granted) AS waiting"))).await.unwrap().unwrap();
+                    if row.try_get::<bool>("","waiting").unwrap() {break;}
+                    tokio::time::sleep(StdDuration::from_millis(10)).await;
+                }
+            } else if stage=="send" {sending.notified().await;}
+            else {switched.notified().await;}
+        }).await.unwrap();
+        driver.abort();
+        assert!(driver.await.unwrap_err().is_cancelled());
+        if let Some(tx) = gate {
+            tx.rollback().await.unwrap();
+        }
+        release.notify_one();
+        let reservations = tokio::time::timeout(StdDuration::from_secs(10), async {
+            loop {
+                let rows = lennette_server::entities::reservations::Entity::find()
+                    .filter(lennette_server::entities::reservations::Column::AccountId.eq(id))
+                    .all(&state.db)
+                    .await
+                    .unwrap();
+                if rows.len() == 2 && rows.iter().all(|r| r.settled) {
+                    break rows;
+                }
+                tokio::time::sleep(StdDuration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let spent = usage_buckets::Entity::find()
+            .filter(usage_buckets::Column::AccountId.eq(id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .ai_spent;
+        assert_eq!(
+            spent, 98,
+            "{stage}: retain the accepted continuation's unknown usage charge"
+        );
+        for reservation in reservations {
+            billing::settle(&state, reservation.id, 0).await.unwrap();
+        }
+        assert_eq!(
+            usage_buckets::Entity::find()
+                .filter(usage_buckets::Column::AccountId.eq(id))
+                .one(&state.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .ai_spent,
+            spent,
+            "settlement must be idempotent"
+        );
+        server.abort();
+        cleanup(state, id).await;
+    }
+}
+
 fn signed_headers(id: &str, body: &[u8], secret: &[u8]) -> HeaderMap {
     use base64::{Engine, engine::general_purpose::STANDARD};
     use hmac::{Hmac, KeyInit, Mac};

@@ -1,4 +1,8 @@
-param([Parameter(Mandatory=$true)][string]$Binary)
+param(
+    [Parameter(Mandatory=$true)][string]$Binary,
+    # Existing profiles can hide the app icon even in Normal mode.
+    [switch]$HiddenAppIcon
+)
 $ErrorActionPreference = 'Stop'
 $Binary = (Resolve-Path $Binary).Path
 Add-Type @'
@@ -271,10 +275,13 @@ try {
         if ([LennetteWindows]::NonWhitePixels($area) -ne 0) { throw 'Protected app pixels or a black fallback leaked into the full-desktop capture' }
         [LennetteWindows]::ShowWindow($window, 0) | Out-Null
     }
+    # End the capture fixture before checking visible-window mode changes.
+    [LennetteWindows]::DestroyWindow($backdrop) | Out-Null
+    $backdrop = [IntPtr]::Zero
     Send-Command '--normal'
     $script:stage = 'normal/privacy switching'
     Wait-For { [LennetteWindows]::Find($app.Id, 'Lennette tray') -ne [IntPtr]::Zero } 'normal-mode tray'
-    Wait-For { ([LennetteWindows]::GetWindowLongPtr($overlay, -20).ToInt64() -band 0x80) -eq 0 } 'normal-mode taskbar style'
+    Wait-For { (([LennetteWindows]::GetWindowLongPtr($overlay, -20).ToInt64() -band 0x80) -ne 0) -eq $HiddenAppIcon.IsPresent } 'normal-mode taskbar style matches icon preference'
     Send-Command '--privacy'
     Wait-For { [LennetteWindows]::Find($app.Id, 'Lennette tray') -eq [IntPtr]::Zero } 'privacy-mode tray removal'
     Wait-For { ([LennetteWindows]::GetWindowLongPtr($overlay, -20).ToInt64() -band 0x80) -ne 0 } 'privacy-mode taskbar style'

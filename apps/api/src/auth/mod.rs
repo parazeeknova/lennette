@@ -481,6 +481,23 @@ pub async fn refresh(
         return Err(ApiError::Unauthorized);
     }
     if !equal(&session.refresh_hash, &digest(&request.refresh_token)) {
+        // A lost response or concurrent retry can repeat the last refresh.
+        // Return that exact rotation briefly; never extend the retry window.
+        let cached: Option<String> = state
+            .redis
+            .get(format!("refresh-retry:{}", digest(&request.refresh_token)))
+            .await?;
+        if let Some(cached) = cached
+            && let Ok(mut tokens) = serde_json::from_str::<Tokens>(&cached)
+            && tokens.account_id == session.account_id
+            && equal(&session.refresh_hash, &digest(&tokens.refresh_token))
+            && equal(&session.access_hash, &digest(&tokens.access_token))
+        {
+            tokens.expires_in = (session.access_expires_at - Utc::now())
+                .num_seconds()
+                .max(0) as u64;
+            return Ok(Json(tokens));
+        }
         // A stale refresh token is a replay: revoke the entire device session.
         let mut model: sessions::ActiveModel = session.into();
         model.revoked_at = Set(Some(Utc::now()));
@@ -497,13 +514,24 @@ pub async fn refresh(
     model.access_expires_at = Set(Utc::now() + Duration::minutes(15));
     model.refresh_expires_at = Set(Utc::now() + Duration::days(30));
     model.update(&tx).await?;
-    tx.commit().await?;
-    Ok(Json(Tokens {
+    let tokens = Tokens {
         access_token: access,
         refresh_token: refresh,
         expires_in: 900,
         account_id,
-    }))
+    };
+    let _: () = state
+        .redis
+        .set(
+            format!("refresh-retry:{}", digest(&request.refresh_token)),
+            serde_json::to_string(&tokens).map_err(anyhow::Error::from)?,
+            Some(Expiration::EX(60)),
+            None,
+            false,
+        )
+        .await?;
+    tx.commit().await?;
+    Ok(Json(tokens))
 }
 fn token_id(token: &str) -> Result<Uuid> {
     token
@@ -527,6 +555,23 @@ pub async fn authenticate(state: &AppState, token: &str) -> Result<Principal> {
         device_id: session.device_id,
         session_id: session.id,
     })
+}
+
+/// An established connection has already proved its access token. Rotation must
+/// not revoke it; keep checking the device login and its long-lived expiry.
+pub async fn validate_session(state: &AppState, principal: &Principal) -> Result<()> {
+    let session = sessions::Entity::find_by_id(principal.session_id)
+        .one(&state.db)
+        .await?
+        .ok_or(ApiError::Unauthorized)?;
+    if session.revoked_at.is_some()
+        || session.refresh_expires_at <= Utc::now()
+        || session.account_id != principal.account_id
+        || session.device_id != principal.device_id
+    {
+        return Err(ApiError::Unauthorized);
+    }
+    Ok(())
 }
 pub async fn guard(
     State(state): State<AppState>,

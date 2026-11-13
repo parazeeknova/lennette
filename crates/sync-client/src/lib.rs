@@ -32,6 +32,8 @@ pub enum Error {
     Protocol(String),
     #[error("local callback failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("could not save refreshed login: {0}")]
+    Persistence(String),
 }
 pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Serialize, Deserialize)]
@@ -46,7 +48,10 @@ pub struct Client {
     base: Url,
     session: Arc<Mutex<SavedSession>>,
     revoked: Arc<AtomicBool>,
+    persist: Option<Arc<SessionStore>>,
+    dirty: Arc<AtomicBool>,
 }
+type SessionStore = dyn Fn(&SavedSession) -> Result<()> + Send + Sync;
 pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -78,6 +83,8 @@ impl Client {
             http: http()?,
             session: Arc::new(Mutex::new(session)),
             revoked: Arc::new(AtomicBool::new(false)),
+            persist: None,
+            dirty: Arc::new(AtomicBool::new(false)),
         })
     }
     pub fn is_revoked(&self) -> bool {
@@ -85,6 +92,27 @@ impl Client {
     }
     pub fn mark_revoked(&self) {
         self.revoked.store(true, Ordering::Release);
+    }
+    /// Install the device's credential store before sharing this login.
+    pub fn with_persistence(
+        mut self,
+        persist: impl Fn(&SavedSession) -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.persist = Some(Arc::new(persist));
+        self
+    }
+
+    fn persist_locked(&self, session: &SavedSession) -> Result<()> {
+        if let Some(persist) = &self.persist {
+            persist(session)?;
+        }
+        self.dirty.store(false, Ordering::Release);
+        Ok(())
+    }
+
+    pub async fn persist(&self) -> Result<()> {
+        let session = self.session.lock().await;
+        self.persist_locked(&session)
     }
     async fn checked(&self, response: reqwest::Response) -> Result<reqwest::Response> {
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
@@ -108,11 +136,26 @@ impl Client {
             .map_err(|_| Error::Protocol("invalid API path".into()))
     }
     pub async fn access_token(&self) -> Result<String> {
+        self.token(None).await
+    }
+
+    /// Recover once from a token rejected after another request rotated it.
+    /// Only a rejected refresh token permanently signs out the login.
+    pub async fn recover_access_token(&self, rejected: &str) -> Result<String> {
+        self.token(Some(rejected)).await
+    }
+
+    async fn token(&self, rejected: Option<&str>) -> Result<String> {
         if self.is_revoked() {
             return Err(Error::SessionRevoked);
         }
         let mut session = self.session.lock().await;
-        if session.expires_at <= now() + 60 {
+        if self.is_revoked() {
+            return Err(Error::SessionRevoked);
+        }
+        if session.expires_at <= now() + 60
+            || rejected == Some(session.tokens.access_token.as_str())
+        {
             let response = self
                 .http
                 .post(self.url("/v1/auth/refresh")?)
@@ -120,13 +163,35 @@ impl Client {
                 .send()
                 .await?;
             let tokens: protocol::Tokens = self.checked(response).await?.json().await?;
+            if self.is_revoked() {
+                return Err(Error::SessionRevoked);
+            }
             if tokens.account_id != session.tokens.account_id {
                 return Err(Error::Protocol("account changed during refresh".into()));
             }
             session.expires_at = now() + tokens.expires_in;
             session.tokens = tokens;
+            self.dirty.store(true, Ordering::Release);
+        }
+        if self.dirty.load(Ordering::Acquire) {
+            self.persist_locked(&session)?;
         }
         Ok(session.tokens.access_token.clone())
+    }
+
+    /// Retry an authenticated HTTP request once after a stale access token.
+    pub async fn send(
+        &self,
+        build: impl Fn(&str) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response> {
+        let token = self.access_token().await?;
+        let response = build(&token).send().await?;
+        if response.status() != reqwest::StatusCode::UNAUTHORIZED {
+            return checked(response).await;
+        }
+        drop(response);
+        let token = self.recover_access_token(&token).await?;
+        checked(build(&token).send().await?).await
     }
     pub async fn request<T: Serialize + ?Sized>(
         &self,
@@ -134,15 +199,13 @@ impl Client {
         path: &str,
         body: &T,
     ) -> Result<reqwest::Response> {
-        let token = self.access_token().await?;
-        self.checked(
+        let url = self.url(path)?;
+        self.send(|token| {
             self.http
-                .request(method, self.url(path)?)
+                .request(method.clone(), url.clone())
                 .bearer_auth(token)
                 .json(body)
-                .send()
-                .await?,
-        )
+        })
         .await
     }
     pub async fn push(
@@ -330,8 +393,167 @@ impl Login {
 #[cfg(test)]
 mod session_tests {
     use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    async fn fixture(
+        expired: bool,
+        replies: Vec<(&'static str, u16, Value)>,
+    ) -> (Client, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for (path, status, body) in replies {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0u8; 4096];
+                loop {
+                    let n = socket.read(&mut buffer).await.unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&buffer[..n]);
+                    if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]);
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                let request = String::from_utf8_lossy(&request);
+                assert_eq!(
+                    request.lines().next().unwrap().split_whitespace().nth(1),
+                    Some(path)
+                );
+                let body = body.to_string();
+                socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let client = Client::restore(SavedSession {
+            api_url: base,
+            expires_at: if expired { 0 } else { now() + 3600 },
+            tokens: tokens("old-access", "old-refresh"),
+        })
+        .unwrap();
+        (client, server)
+    }
+
+    fn tokens(access: &str, refresh: &str) -> protocol::Tokens {
+        protocol::Tokens {
+            access_token: access.into(),
+            refresh_token: refresh.into(),
+            expires_in: 900,
+            account_id: Uuid::nil(),
+        }
+    }
+
     #[tokio::test]
-    async fn unauthorized_revokes_all_clones_but_quota_and_network_errors_do_not() {
+    async fn stale_access_token_refreshes_and_retries_without_revoking_clones() {
+        let fresh = serde_json::to_value(tokens("new-access", "new-refresh")).unwrap();
+        let (client, server) = fixture(
+            false,
+            vec![
+                ("/v1/me", 401, serde_json::json!({})),
+                ("/v1/auth/refresh", 200, fresh),
+                ("/v1/me", 200, serde_json::json!({"ok":true})),
+            ],
+        )
+        .await;
+        let stored = Arc::new(StdMutex::new(None));
+        let write = stored.clone();
+        let client = client.with_persistence(move |saved| {
+            *write.lock().unwrap() = Some(saved.clone());
+            Ok(())
+        });
+        let clone = client.clone();
+        assert!(
+            client
+                .request(reqwest::Method::GET, "/v1/me", &())
+                .await
+                .is_ok()
+        );
+        assert!(!clone.is_revoked());
+        assert_eq!(clone.access_token().await.unwrap(), "new-access");
+        assert_eq!(
+            stored
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .tokens
+                .refresh_token,
+            "new-refresh"
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn simultaneous_rejected_tokens_share_one_refresh_and_persist_before_return() {
+        let (client, server) = fixture(
+            false,
+            vec![(
+                "/v1/auth/refresh",
+                200,
+                serde_json::to_value(tokens("new-access", "new-refresh")).unwrap(),
+            )],
+        )
+        .await;
+        let writes = Arc::new(StdMutex::new(0));
+        let count = writes.clone();
+        let client = client.with_persistence(move |_| {
+            *count.lock().unwrap() += 1;
+            Ok(())
+        });
+        let clone = client.clone();
+        let (first, second) = tokio::join!(
+            client.recover_access_token("old-access"),
+            clone.recover_access_token("old-access")
+        );
+        assert_eq!(first.unwrap(), "new-access");
+        assert_eq!(second.unwrap(), "new-access");
+        assert_eq!(*writes.lock().unwrap(), 1);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn failed_persistence_retries_saving_without_rotating_again() {
+        let (client, server) = fixture(
+            true,
+            vec![(
+                "/v1/auth/refresh",
+                200,
+                serde_json::to_value(tokens("new-access", "new-refresh")).unwrap(),
+            )],
+        )
+        .await;
+        let writes = Arc::new(StdMutex::new(0));
+        let count = writes.clone();
+        let client = client.with_persistence(move |_| {
+            let mut count = count.lock().unwrap();
+            *count += 1;
+            if *count == 1 {
+                Err(Error::Persistence("temporary storage error".into()))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(
+            client.access_token().await,
+            Err(Error::Persistence(_))
+        ));
+        assert_eq!(client.access_token().await.unwrap(), "new-access");
+        assert_eq!(*writes.lock().unwrap(), 2);
+        assert!(!client.is_revoked());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejected_refresh_revokes_all_clones_but_transient_failures_do_not() {
         for (status, expired) in [
             (401, false),
             (401, true),
@@ -339,25 +561,23 @@ mod session_tests {
             (429, false),
             (503, false),
         ] {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let base = format!("http://{}", listener.local_addr().unwrap());
-            let server = tokio::spawn(async move {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut bytes = [0u8; 8192];
-                let _ = socket.read(&mut bytes).await.unwrap();
-                socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}} ").trim_end().as_bytes()).await.unwrap();
-            });
-            let client = Client::restore(SavedSession {
-                api_url: base,
-                expires_at: if expired { 0 } else { now() + 3600 },
-                tokens: protocol::Tokens {
-                    access_token: "test-token".into(),
-                    refresh_token: "test-refresh".into(),
-                    expires_in: 3600,
-                    account_id: Uuid::new_v4(),
-                },
-            })
-            .unwrap();
+            let replies = if status == 401 && !expired {
+                vec![
+                    ("/v1/me", 401, serde_json::json!({})),
+                    ("/v1/auth/refresh", 401, serde_json::json!({})),
+                ]
+            } else {
+                vec![(
+                    if expired {
+                        "/v1/auth/refresh"
+                    } else {
+                        "/v1/me"
+                    },
+                    status,
+                    serde_json::json!({}),
+                )]
+            };
+            let (client, server) = fixture(expired, replies).await;
             let clone = client.clone();
             assert!(
                 client
@@ -365,11 +585,7 @@ mod session_tests {
                     .await
                     .is_err()
             );
-            assert_eq!(client.is_revoked(), status == 401);
             assert_eq!(clone.is_revoked(), status == 401);
-            if status == 401 {
-                assert!(clone.access_token().await.is_err());
-            }
             server.await.unwrap();
         }
     }

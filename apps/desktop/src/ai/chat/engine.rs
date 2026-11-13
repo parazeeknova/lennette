@@ -247,22 +247,26 @@ pub async fn stream_chat_bounded<F: std::future::Future<Output = ()>>(
 ) -> Result<String, ChatError> {
     let started = std::time::Instant::now();
     let managed_session = config.api_key == "managed-session";
+    let managed_account = if managed_session {
+        Some(crate::managed::active().ok_or(ChatError::NotConfigured)?)
+    } else {
+        None
+    };
     let managed_config;
-    let config = if managed_session {
-        let account = crate::managed::active().ok_or(ChatError::NotConfigured)?;
+    let config = if let Some(account) = &managed_account {
         managed_config = {
             let mut config = config.clone();
-            if !crate::managed::catalog::has_catalog(&account) {
-                crate::managed::catalog::models(&account)
+            if !crate::managed::catalog::has_catalog(account) {
+                crate::managed::catalog::models(account)
                     .await
                     .map_err(ChatError::Protocol)?;
             }
-            config.model = crate::managed::catalog::selected_model(&account, Some(&config.model));
+            config.model = crate::managed::catalog::selected_model(account, Some(&config.model));
             config.api_key = account
                 .access_token()
                 .await
                 .map_err(|e| ChatError::Protocol(e.to_string()))?;
-            crate::managed::save_session(&account)
+            crate::managed::save_session(account)
                 .await
                 .map_err(ChatError::Protocol)?;
             config
@@ -272,7 +276,7 @@ pub async fn stream_chat_bounded<F: std::future::Future<Output = ()>>(
         config
     };
     let mut first = true;
-    let result = stream_chat_inner(client, config, history, context, cancel, managed_session, |text| {
+    let result = stream_chat_inner(client, config, history, context, cancel, managed_account.as_ref(), |text| {
         if first {
             first = false;
             tracing::debug!(provider = %config.id, elapsed_ms = started.elapsed().as_millis(), "provider first text");
@@ -297,9 +301,10 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     history: &[Message],
     context: &TurnContext,
     cancel: Arc<watch::Receiver<bool>>,
-    managed_session: bool,
+    managed_account: Option<&lennette_sync_client::Client>,
     mut on_text: impl FnMut(String) -> F,
 ) -> Result<String, ChatError> {
+    let managed_session = managed_account.is_some();
     let definition = config.chat_definition().ok_or(ChatError::NotConfigured)?;
     let provider = &definition;
     if config
@@ -320,11 +325,14 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     let mut body = build_body(provider, config, history, context);
     if managed_session {
         body["max_tokens"] = json!(2048);
-        body["relay_live"] = json!(context.conversation_id.is_some());
+        body["relay_live"] =
+            json!(context.conversation_id.is_some() && !crate::managed::meeting_sync_deferred());
         if let Some(conversation) = context.conversation_id {
             body["conversation_id"] = json!(conversation);
         }
-        if let Some(meeting) = crate::managed::meeting() {
+        if !crate::managed::meeting_sync_deferred()
+            && let Some(meeting) = crate::managed::meeting()
+        {
             body["meeting_id"] = json!(meeting);
         }
     }
@@ -333,20 +341,25 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     let mut request = if let Some(custom) = &config.custom {
         let method = reqwest::Method::from_bytes(custom.method.as_bytes())
             .map_err(|_| ChatError::Protocol("invalid request method".into()))?;
-        let mut request = client.request(method, endpoint);
+        let mut request = client.request(method, &endpoint);
         if let Some((header, value)) = custom.header(&config.api_key) {
             request = request.header(header, value);
         }
         request
     } else {
-        client.post(endpoint).bearer_auth(&config.api_key)
+        client.post(&endpoint).bearer_auth(&config.api_key)
     };
     if provider.wire == ChatWire::Anthropic {
         request = request.header("anthropic-version", "2026-10-21");
     }
     request = request.json(&body);
     let response = tokio::select! {
-        result = request.send() => result?,
+        result = async {
+            if let Some(account) = managed_account {
+                account.send(|token| client.post(&endpoint).bearer_auth(token).json(&body))
+                    .await.map_err(|e| ChatError::Protocol(e.to_string()))
+            } else { request.send().await.map_err(ChatError::from) }
+        } => result?,
         _ = wait_for_cancellation(&mut cancellation) => return Ok(String::new()),
     };
 

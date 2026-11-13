@@ -246,6 +246,26 @@ impl Overlay {
         let main = self
             .menu_surface("app-menu")
             .child(
+                self.menu_row("meeting-low-latency", self.runtime_settings.low_latency)
+                    .child(div().flex_1().child("Low latency"))
+                    .child(if self.runtime_settings.low_latency { "On" } else { "Off" })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let previous = this.runtime_settings.clone();
+                        this.runtime_settings.low_latency = !previous.low_latency;
+                        if let Some(db) = this.services.connect()
+                            && let Err(error) = this.runtime_settings.save_changed(&previous, &db) {
+                            this.runtime_settings = previous;
+                            this.chat_error = Some(error.to_string());
+                        }
+                        this.listen_notice = Some(if this.is_listening() || this.transcription_busy {
+                            "Low latency preference saved for your next meeting. The current meeting keeps its original sync mode."
+                        } else if this.runtime_settings.low_latency {
+                            "Low latency: transcript and answers are saved locally, then synced after the meeting. Speech and AI still use your configured providers."
+                        } else { "Live web sync will be used for the next meeting." }.into());
+                        cx.notify();
+                    })),
+            )
+            .child(
                 self.menu_row("app-new", false)
                     .child("New")
                     .on_click(cx.listener(|this, _, _, cx| {

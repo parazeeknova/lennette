@@ -315,6 +315,8 @@ pub struct Settings {
     pub auto_scroll: bool,
     pub collapse_live_transcript: bool,
     pub auto_recap: bool,
+    /// Defer workspace sync until recording and its final transcript have finished.
+    pub low_latency: bool,
     pub smart_follow_ups: bool,
     pub smart_follow_ups_prompt: String,
     pub cli_connection: String,
@@ -355,6 +357,7 @@ impl Default for Settings {
             auto_scroll: true,
             collapse_live_transcript: true,
             auto_recap: false,
+            low_latency: true,
             smart_follow_ups: true,
             smart_follow_ups_prompt: FOLLOW_UP_PROMPT.to_owned(),
             cli_connection: String::new(),
@@ -454,6 +457,7 @@ impl Settings {
                 defaults.collapse_live_transcript,
             ),
             auto_recap: flag("auto_recap", defaults.auto_recap),
+            low_latency: flag("low_latency", defaults.low_latency),
             smart_follow_ups: flag(keys::SMART_FOLLOW_UPS, defaults.smart_follow_ups),
             smart_follow_ups_prompt: match get(keys::SMART_FOLLOW_UPS_PROMPT) {
                 None | Some("Suggest three short follow-up questions.") => {
@@ -504,6 +508,7 @@ impl Settings {
 
     fn pairs(&self) -> Vec<(&'static str, String)> {
         vec![
+            ("low_latency", self.low_latency.to_string()),
             (keys::THEME, self.theme.as_str().to_owned()),
             (keys::TRANSPARENCY, self.transparency.to_string()),
             (keys::FONT_SCALE, self.font_scale.to_string()),
@@ -624,6 +629,7 @@ mod tests {
         assert!(settings.show_watermark);
         assert_eq!(settings.overlay_size, "sm");
         assert!(settings.collapse_live_transcript);
+        assert!(settings.low_latency);
     }
 
     #[test]
@@ -658,6 +664,7 @@ mod tests {
             auto_scroll: false,
             collapse_live_transcript: false,
             auto_recap: true,
+            low_latency: false,
             smart_follow_ups: false,
             smart_follow_ups_prompt: "custom".into(),
             cli_connection: "".into(),

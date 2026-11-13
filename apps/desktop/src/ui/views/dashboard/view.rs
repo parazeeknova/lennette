@@ -1081,7 +1081,7 @@ impl DashboardView {
             .unwrap_or_else(|| "Conversation".to_owned());
 
         let mut markdown = format!("# {title}\n\n");
-        for record in records {
+        for record in records.into_iter().filter(|record| !record.context_only) {
             let who = if record.role == "user" {
                 "You"
             } else {
@@ -1345,7 +1345,11 @@ impl DashboardView {
         else {
             return Vec::new();
         };
-        conversations::messages(database.connection(), id).unwrap_or_default()
+        conversations::messages(database.connection(), id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|message| !message.context_only)
+            .collect()
     }
 
     /// Navigation across the top, as one quiet row of pills.

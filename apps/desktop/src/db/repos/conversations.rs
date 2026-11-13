@@ -27,6 +27,8 @@ pub struct MessageRecord {
     pub timestamp: i64,
     #[serde(default)]
     pub images: Vec<String>,
+    #[serde(default)]
+    pub context_only: bool,
 }
 
 /// Create a conversation and return its id.
@@ -122,9 +124,14 @@ pub fn update_message(connection: &Connection, id: &str, content: &str) -> Resul
     Ok(())
 }
 
-/// Persist compact previews in the existing attachment column.
-pub fn save_image_previews(connection: &Connection, id: &str, images: &[String]) -> Result<()> {
-    let payload = serde_json::json!({"previews": images}).to_string();
+/// Preserve turn origin alongside compact previews, including after account sync.
+pub fn save_turn_context(
+    connection: &Connection,
+    id: &str,
+    images: &[String],
+    context_only: bool,
+) -> Result<()> {
+    let payload = serde_json::json!({"previews": images, "context_only": context_only}).to_string();
     connection.execute(
         "UPDATE messages SET attached_files = ?2 WHERE id = ?1",
         params![id, payload],
@@ -132,10 +139,16 @@ pub fn save_image_previews(connection: &Connection, id: &str, images: &[String])
     Ok(())
 }
 
-fn image_previews(payload: Option<String>) -> Vec<String> {
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct TurnContext {
+    previews: Vec<String>,
+    context_only: bool,
+}
+
+fn turn_context(payload: Option<String>) -> TurnContext {
     payload
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(&payload).ok())
-        .and_then(|payload| serde_json::from_value(payload.get("previews")?.clone()).ok())
+        .and_then(|payload| serde_json::from_str(&payload).ok())
         .unwrap_or_default()
 }
 
@@ -147,12 +160,14 @@ pub fn messages(connection: &Connection, conversation_id: &str) -> Result<Vec<Me
          ORDER BY timestamp ASC, rowid ASC",
     )?;
     let rows = statement.query_map(params![conversation_id], |row| {
+        let context = turn_context(row.get(4)?);
         Ok(MessageRecord {
             id: row.get(0)?,
             role: row.get(1)?,
             content: row.get(2)?,
             timestamp: row.get(3)?,
-            images: image_previews(row.get(4)?),
+            images: context.previews,
+            context_only: context.context_only,
         })
     })?;
     rows.collect::<std::result::Result<_, _>>()
@@ -177,12 +192,14 @@ pub fn recent_messages(
     )?;
     let mut rows = statement
         .query_map(params![conversation_id, limit as i64], |row| {
+            let context = turn_context(row.get(4)?);
             Ok(MessageRecord {
                 id: row.get(0)?,
                 role: row.get(1)?,
                 content: row.get(2)?,
                 timestamp: row.get(3)?,
-                images: image_previews(row.get(4)?),
+                images: context.previews,
+                context_only: context.context_only,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;

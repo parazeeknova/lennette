@@ -1468,7 +1468,7 @@ impl Overlay {
         };
         let history = match self
             .chat
-            .begin_with_images(database.as_ref(), &question, &previews)
+            .begin_turn(database.as_ref(), &question, &previews, automatic)
         {
             Ok(history) => history,
             Err(error) => {
@@ -1478,10 +1478,13 @@ impl Overlay {
         };
         self.save_resume_context(database.as_ref());
 
-        // Show exactly the question sent, including ambient and shortcut turns.
-        let mut message = crate::features::domain::Message::user(question);
-        message.images = previews;
-        self.conversation.push(message);
+        // Spoken prompts already have a home in the collapsible transcript.
+        // Only explicit sends create user bubbles in the response area.
+        if !automatic {
+            let mut message = crate::features::domain::Message::user(question);
+            message.images = previews;
+            self.conversation.push(message);
+        }
 
         let context = crate::features::chat_engine::TurnContext {
             conversation_id: self.chat.conversation_id().and_then(|id| id.parse().ok()),

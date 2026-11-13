@@ -66,26 +66,18 @@ pub async fn transcribe(
 ) -> Result<String, SttError> {
     if config.api_key == "managed-session" {
         let account = crate::managed::active().ok_or(SttError::NotConfigured)?;
-        let token = account
-            .access_token()
-            .await
+        let url = account
+            .url("/v1/speech/transcribe")
             .map_err(|e| SttError::Protocol(e.to_string()))?;
-        crate::managed::save_session(&account)
-            .await
-            .map_err(SttError::Protocol)?;
         let response = account
-            .http
-            .post(
+            .send(|token| {
                 account
-                    .url("/v1/speech/transcribe")
-                    .map_err(|e| SttError::Protocol(e.to_string()))?,
-            )
-            .bearer_auth(token)
-            .header("content-type", "audio/wav")
-            .body(wav)
-            .send()
-            .await?;
-        let response = lennette_sync_client::checked(response)
+                    .http
+                    .post(url.clone())
+                    .bearer_auth(token)
+                    .header("content-type", "audio/wav")
+                    .body(wav.clone())
+            })
             .await
             .map_err(|e| SttError::Protocol(e.to_string()))?;
         let value: Value = response.json().await?;
@@ -501,14 +493,17 @@ pub struct LiveTranscriber {
 impl LiveTranscriber {
     pub async fn connect_config(config: &ProviderConfig) -> Result<Self, SttError> {
         if config.api_key == "managed-session" {
-            crate::managed::flush().await.map_err(SttError::Protocol)?;
+            let relay_live = !crate::managed::meeting_sync_deferred();
+            if relay_live {
+                crate::managed::flush().await.map_err(SttError::Protocol)?;
+            }
             let account = crate::managed::active().ok_or(SttError::NotConfigured)?;
             let (meeting, offset) = crate::managed::meeting_context().ok_or_else(|| {
                 SttError::Protocol("start a meeting before live transcription".into())
             })?;
             let mut url = account
                 .url(&format!(
-                    "/v1/speech/live?meeting_id={meeting}&offset_seconds={offset}"
+                    "/v1/speech/live?meeting_id={meeting}&offset_seconds={offset}&relay_live={relay_live}"
                 ))
                 .map_err(|e| SttError::Protocol(e.to_string()))?;
             let scheme = if url.scheme() == "https" { "wss" } else { "ws" };
@@ -524,6 +519,8 @@ impl LiveTranscriber {
             return Self::connect_authenticated(
                 url.to_string(),
                 Some(("Authorization".into(), format!("Bearer {token}"))),
+                !relay_live,
+                Some(&account),
             )
             .await;
         }
@@ -566,7 +563,7 @@ impl LiveTranscriber {
             url.query_pairs_mut()
                 .append_pair("language", &config.language);
         }
-        Self::connect_authenticated(url.into(), custom.header(&config.api_key)).await
+        Self::connect_authenticated(url.into(), custom.header(&config.api_key), false, None).await
     }
 
     /// A bounded batch adapter keeps microphone and remote speakers separate.
@@ -663,6 +660,8 @@ impl LiveTranscriber {
         Self::connect_authenticated(
             url,
             Some(("Authorization".into(), format!("Token {api_key}"))),
+            false,
+            None,
         )
         .await
     }
@@ -670,9 +669,16 @@ impl LiveTranscriber {
     async fn connect_authenticated(
         url: String,
         auth: Option<(String, String)>,
+        require_local_relay: bool,
+        managed_account: Option<&lennette_sync_client::Client>,
     ) -> Result<Self, SttError> {
         crate::core::install_tls_provider();
+        let rejected_token = auth
+            .as_ref()
+            .and_then(|(_, value)| value.strip_prefix("Bearer "))
+            .map(str::to_owned);
         let mut request = url
+            .as_str()
             .into_client_request()
             .map_err(|e| SttError::Socket(e.to_string()))?;
         if let Some((name, value)) = auth {
@@ -682,21 +688,49 @@ impl LiveTranscriber {
                 HeaderValue::from_str(&value).map_err(|_| SttError::MissingKey)?,
             );
         }
-        let (socket, _) = tokio::time::timeout(
+        let socket_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .max_message_size(Some(1024 * 1024))
+            .max_frame_size(Some(1024 * 1024));
+        let mut connection = tokio::time::timeout(
             std::time::Duration::from_secs(10),
-            tokio_tungstenite::connect_async_with_config(
-                request,
-                Some(
-                    tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
-                        .max_message_size(Some(1024 * 1024))
-                        .max_frame_size(Some(1024 * 1024)),
-                ),
-                true,
-            ),
+            tokio_tungstenite::connect_async_with_config(request, Some(socket_config), true),
         )
         .await
-        .map_err(|_| SttError::Socket("Speech connection timed out".into()))?
-        .map_err(|e| SttError::Socket(e.to_string()))?;
+        .map_err(|_| SttError::Socket("Speech connection timed out".into()))?;
+        if matches!(&connection, Err(tokio_tungstenite::tungstenite::Error::Http(response)) if response.status().as_u16() == 401)
+            && let (Some(account), Some(rejected)) = (managed_account, rejected_token)
+        {
+            let token = account
+                .recover_access_token(&rejected)
+                .await
+                .map_err(|e| SttError::Protocol(e.to_string()))?;
+            let mut request = url
+                .as_str()
+                .into_client_request()
+                .map_err(|e| SttError::Socket(e.to_string()))?;
+            request.headers_mut().insert(
+                "authorization",
+                HeaderValue::from_str(&format!("Bearer {token}"))
+                    .map_err(|_| SttError::MissingKey)?,
+            );
+            connection = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio_tungstenite::connect_async_with_config(request, Some(socket_config), true),
+            )
+            .await
+            .map_err(|_| SttError::Socket("Speech connection timed out".into()))?;
+        }
+        let (mut socket, response) = connection.map_err(|e| SttError::Socket(e.to_string()))?;
+        if require_local_relay
+            && response
+                .headers()
+                .get("x-lennette-relay-live")
+                .and_then(|v| v.to_str().ok())
+                != Some("false")
+        {
+            let _ = socket.close(None).await;
+            return Err(SttError::Protocol("The server needs an update to support low latency meetings. No audio was sent. Update the server or turn off low latency for your next meeting.".into()));
+        }
         let (mut sink, mut source) = socket.split();
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<i16>>(64);
         let (stop_tx, mut stop_rx) = watch::channel(false);

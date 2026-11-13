@@ -126,7 +126,7 @@ impl Theme {
         card: rgba(0x18, 0x18, 0x18, 0.52),
         foreground: rgb_hex(0xf4f4f4),
         muted: rgba(0xff, 0xff, 0xff, 0.08),
-        muted_foreground: rgb_hex(0xa6a6a6),
+        muted_foreground: rgb_hex(0xc2c2c2),
         border: rgba(0xff, 0xff, 0xff, 0.085),
         frame_border: rgba(0xff, 0xff, 0xff, 0.22),
         frame_outer_border: rgba(0x45, 0x48, 0x50, 0.55),
@@ -334,11 +334,7 @@ impl Surfaces {
     }
 
     pub fn muted_foreground(self) -> Rgba {
-        if self.theme.is_glass() {
-            self.theme.muted_foreground
-        } else {
-            self.fade(self.theme.muted_foreground)
-        }
+        self.theme.muted_foreground
     }
 
     pub fn border(self) -> Rgba {
@@ -466,6 +462,8 @@ mod tests {
             assert!(low.input().a < high.input().a);
             assert!(low.muted().a < high.muted().a);
             assert!(low.accent().a < high.accent().a);
+            assert_eq!(low.muted_foreground().a, 1.0);
+            assert_eq!(high.muted_foreground().a, 1.0);
             assert!(theme.control_border(true).a <= 0.12);
             assert!(theme.focus_border().a < 0.2);
             assert_eq!(theme.foreground.a, 1.0);

@@ -11,6 +11,8 @@ use std::ops::Range;
 pub const DENSE_HEIGHT: f32 = 28.0;
 
 pub struct Editor {
+    /// Minimum height for multiline context editors.
+    pub min_height: f32,
     pub compact: bool,
     pub dense: bool,
     pub search: bool,
@@ -43,6 +45,7 @@ impl Editor {
         let mut input = Input::new();
         input.set_text(text);
         Self {
+            min_height: 100.0,
             compact: false,
             dense: false,
             search: false,
@@ -203,12 +206,12 @@ impl Render for Editor {
             .min_h(crate::ui::theme::scaled(if self.compact {
                 height
             } else {
-                100.0
+                self.min_height
             }))
             .max_h(crate::ui::theme::scaled(if self.compact {
                 height
             } else {
-                240.0
+                self.min_height.max(240.0)
             }))
             .flex_shrink_0()
             .when(self.compact, |style| {

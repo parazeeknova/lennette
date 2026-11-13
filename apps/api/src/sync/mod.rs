@@ -367,7 +367,7 @@ pub async fn socket(
     if q.after < 0 {
         return Err(ApiError::BadRequest("negative cursor".into()));
     }
-    let token = headers
+    let _token = headers
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
@@ -389,7 +389,7 @@ pub async fn socket(
         return Err(ApiError::RateLimited);
     }
     Ok(ws.max_message_size(4096).on_upgrade(move|ws|async move{
-        if let Err(error)=stream_changes(&state,&p,ws,q.after,&token,&key,&lease).await{tracing::debug!(%error,"sync connection ended")}
+        if let Err(error)=stream_changes(&state,&p,ws,q.after,&key,&lease).await{tracing::debug!(%error,"sync connection ended")}
         let _:std::result::Result<i64,_>=state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",vec![key],vec![lease]).await;
     }))
 }
@@ -398,7 +398,6 @@ async fn stream_changes(
     p: &Principal,
     mut ws: WebSocket,
     mut cursor: i64,
-    token: &str,
     key: &str,
     lease: &str,
 ) -> Result<()> {
@@ -421,14 +420,14 @@ async fn stream_changes(
                 _=state.shutdown.cancelled()=>break,
                 _=poll.tick()=>{},
                 notification=messages.recv()=>{if let Ok(message)=notification {
-                    if message.channel.starts_with("session:") && matches!(auth::authenticate(state,token).await,Err(ApiError::Unauthorized)) {
+                    if message.channel.starts_with("session:") && matches!(auth::validate_session(state,p).await,Err(ApiError::Unauthorized)) {
                         ws.send(Message::Text(r#"{"type":"session_revoked"}"#.into())).await.map_err(anyhow::Error::from)?;
                         break;
                     }
                     if message.channel.starts_with("live:") && let Ok(text)=message.value.convert::<String>(){ws.send(Message::Text(text.into())).await.map_err(anyhow::Error::from)?;}
                 }},
                 _=check.tick()=>{
-                    if let Err(error) = auth::authenticate(state,token).await {
+                    if let Err(error) = auth::validate_session(state,p).await {
                         if matches!(error,ApiError::Unauthorized) { ws.send(Message::Text(r#"{"type":"session_revoked"}"#.into())).await.map_err(anyhow::Error::from)?; }
                         return Err(error);
                     }

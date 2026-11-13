@@ -846,6 +846,35 @@ async fn remote_device_revocation_notifies_sync_socket_immediately() {
     })
     .await
     .unwrap();
+    let (refresh_status, rotated) = request(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        json!({"refresh_token":desktop.refresh_token}),
+    )
+    .await;
+    assert_eq!(refresh_status, StatusCode::OK);
+    // Force the authenticated socket's session check after token rotation.
+    let _: i64 = state
+        .redis
+        .publish(format!("session:{}", principal.session_id), "rotation")
+        .await
+        .unwrap();
+    let _: i64 = state
+        .redis
+        .publish(
+            format!("live:{account}"),
+            json!({"type":"rotation_probe"}).to_string(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(next_json(&mut socket).await["type"], "rotation_probe");
+    assert!(
+        auth::authenticate(&state, rotated["access_token"].as_str().unwrap())
+            .await
+            .is_ok()
+    );
     let started = std::time::Instant::now();
     assert_eq!(
         request(
@@ -1131,6 +1160,79 @@ async fn live_transcripts_reach_another_replica_and_audio_is_not_stored() {
     provider_task.abort();
     replica.redis.quit().await.ok();
     replica.db.clone().close().await.ok();
+    cleanup(state, id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn low_latency_speech_accepts_unsynced_meetings_without_publishing_to_web() {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let (state, _, id, tokens) = fixture().await;
+    subscribe(&state, id).await;
+    let mock = Router::new().route(
+        "/listen",
+        get(|ws: WebSocketUpgrade| async {
+            ws.on_upgrade(|mut socket| async move {
+                while let Some(Ok(message)) = socket.recv().await {
+                    if matches!(message, Message::Binary(_)) {
+                        socket
+                            .send(Message::Text(
+                                json!({"type":"Results","channel_index":[0,2],"is_final":true,
+                        "channel":{"alternatives":[{"transcript":"Local meeting words"}]}})
+                                .to_string()
+                                .into(),
+                            ))
+                            .await
+                            .unwrap();
+                    }
+                }
+            })
+        }),
+    );
+    let (provider, provider_task) = serve(mock).await;
+    let mut config = state.config.clone();
+    config.deepgram_key = SecretString::from("mock-key");
+    config.deepgram_url = format!("{}/listen", provider.replace("http://", "ws://"))
+        .parse()
+        .unwrap();
+    let state = configured(&state, config);
+    let (api, api_task) = serve(routes::router(state.clone())).await;
+    // No meeting metadata is uploaded before starting managed transcription.
+    let local_meeting = Uuid::new_v4();
+    let mut req = format!(
+        "{}/v1/speech/live?meeting_id={local_meeting}&relay_live=false",
+        api.replace("http://", "ws://")
+    )
+    .into_client_request()
+    .unwrap();
+    req.headers_mut().insert(
+        "authorization",
+        format!("Bearer {}", tokens.access_token).parse().unwrap(),
+    );
+    let (mut desktop, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    desktop
+        .send(tokio_tungstenite::tungstenite::Message::Binary(
+            vec![0; 3200].into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        next_json(&mut desktop).await["channel"]["alternatives"][0]["transcript"],
+        "Local meeting words"
+    );
+    // Receiving a transcript establishes that the relay branch has already run.
+    let frames: i64 = state
+        .redis
+        .hlen(format!("live-state:{{{id}}}"))
+        .await
+        .unwrap();
+    assert_eq!(
+        frames, 0,
+        "Neither activity nor transcripts may reach the workspace"
+    );
+    desktop.close(None).await.ok();
+    api_task.abort();
+    provider_task.abort();
     cleanup(state, id).await;
 }
 

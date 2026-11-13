@@ -24,6 +24,16 @@ static PROVIDER_SWITCH: Mutex<Option<(String, String)>> = Mutex::new(None);
 static MEETING: Mutex<Option<(Uuid, f64)>> = Mutex::new(None);
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 static STARTED: OnceLock<()> = OnceLock::new();
+static DEFER_MEETING_SYNC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub fn defer_meeting_sync(defer: bool) {
+    DEFER_MEETING_SYNC.store(defer, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub(crate) fn meeting_sync_deferred() -> bool {
+    DEFER_MEETING_SYNC.load(std::sync::atomic::Ordering::SeqCst)
+}
 pub fn active() -> Option<Client> {
     stored_client().filter(|client| !client.is_revoked())
 }
@@ -69,7 +79,7 @@ pub fn init(path: Option<&Path>) {
     {
         match Client::restore(saved) {
             Ok(client) => {
-                *CLIENT.write().unwrap() = Some(client);
+                *CLIENT.write().unwrap() = Some(with_session_store(client));
                 message("Connecting to your account…")
             }
             Err(e) => message(e.to_string()),
@@ -88,6 +98,13 @@ pub fn init(path: Option<&Path>) {
                 let mut last_pull = std::time::Instant::now() - worker::RECOVERY_INTERVAL;
                 loop {
                     if let (Some(client), Some(path)) = (stored_client(), DATABASE.get()) {
+                        if meeting_sync_deferred() {
+                            message("Low latency · Saved locally · Sync after meeting");
+                            runtime.block_on(async {
+                                tokio::time::sleep(Duration::from_millis(500)).await
+                            });
+                            continue;
+                        }
                         if client.is_revoked() {
                             expire_session(&client);
                             failures = 0;
@@ -164,7 +181,7 @@ pub async fn begin_login(provider: &str) -> Result<Login, String> {
         .map_err(|e| e.to_string())
 }
 pub async fn complete_login(login: Login, import: bool) -> Result<(), String> {
-    let client = login.finish().await.map_err(|e| e.to_string())?;
+    let client = with_session_store(login.finish().await.map_err(|e| e.to_string())?);
     let account = client.account_id().await;
     let path = DATABASE
         .get()
@@ -230,24 +247,44 @@ fn expire_session(client: &Client) {
 }
 
 pub async fn save_session(client: &Client) -> Result<(), String> {
-    let saved = serde_json::to_value(client.saved().await).map_err(|e| e.to_string())?;
-    // An in-flight request from a revoked/older login must not restore its
-    // credentials after sign-out or overwrite a newly connected account.
-    let active = CLIENT.read().unwrap();
-    if client.is_revoked()
-        || !active
+    client.persist().await.map_err(|e| e.to_string())
+}
+
+fn with_session_store(client: Client) -> Client {
+    let owner = client.clone();
+    client.with_persistence(move |saved| {
+        // Called with the token rotation lock held: an older snapshot cannot
+        // overwrite a newer refresh, and a signed-out login cannot return.
+        let active = CLIENT.read().unwrap();
+        if owner.is_revoked()
+            || !active
+                .as_ref()
+                .is_some_and(|current| owner.same_session(current))
+        {
+            return Ok(());
+        }
+        let saved = serde_json::to_value(saved)
+            .map_err(|e| lennette_sync_client::Error::Persistence(e.to_string()))?;
+        let vault = Vault::open_default()
+            .map_err(|e| lennette_sync_client::Error::Persistence(e.to_string()))?;
+        if vault
+            .get(SESSION_KEY)
+            .map_err(|e| lennette_sync_client::Error::Persistence(e.to_string()))?
             .as_ref()
-            .is_some_and(|current| client.same_session(current))
-    {
-        return Ok(());
-    }
-    let vault = Vault::open_default().map_err(|e| e.to_string())?;
-    if vault.get(SESSION_KEY).map_err(|e| e.to_string())?.as_ref() != Some(&saved) {
-        vault.set(SESSION_KEY, saved).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+            != Some(&saved)
+        {
+            vault
+                .set(SESSION_KEY, saved)
+                .map_err(|e| lennette_sync_client::Error::Persistence(e.to_string()))?;
+        }
+        Ok(())
+    })
 }
 async fn sync_cycle(client: &Client, db: &Database) -> Result<(), String> {
+    if meeting_sync_deferred() {
+        message("Low latency · Saved locally · Sync after meeting");
+        return Ok(());
+    }
     let account = client.account_id().await;
     let connection = db.connection();
     if sync::meta(connection, "enabled")
@@ -264,9 +301,15 @@ async fn sync_cycle(client: &Client, db: &Database) -> Result<(), String> {
     {
         return Err("This history is bound to a different account.".into());
     }
+    if meeting_sync_deferred() {
+        return Ok(());
+    }
     attachments::upload_pending(client, db).await?;
     // Pull first so conflicts preserve both versions instead of overwriting queued changes.
     loop {
+        if meeting_sync_deferred() {
+            return Ok(());
+        }
         let page = client
             .pull(sync::cursor(connection).map_err(|e| e.to_string())?)
             .await
@@ -289,6 +332,9 @@ async fn sync_cycle(client: &Client, db: &Database) -> Result<(), String> {
             "{conflicts} sync conflict(s). Choose which version to keep in Account settings."
         ));
     }
+    if meeting_sync_deferred() {
+        return Ok(());
+    }
     let pending = sync::pending(connection, account).map_err(|e| e.to_string())?;
     if !pending.is_empty() {
         let mut mutations = pending
@@ -297,6 +343,9 @@ async fn sync_cycle(client: &Client, db: &Database) -> Result<(), String> {
             .collect::<Vec<_>>();
         for mutation in &mut mutations {
             attachments::prepare(db, mutation)?;
+        }
+        if meeting_sync_deferred() {
+            return Ok(());
         }
         let results = client.push(&mutations).await.map_err(|e| e.to_string())?;
         for result in results {

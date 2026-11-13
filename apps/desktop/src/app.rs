@@ -32,6 +32,8 @@ fn macos_overlay_action(cx: &mut App, quit: bool) {
 
 const OVERLAY_WIDTH: f32 = 720.0;
 const OVERLAY_HEIGHT: f32 = 620.0;
+const OVERLAY_MIN_WIDTH: f32 = 480.0;
+const OVERLAY_MIN_HEIGHT: f32 = 420.0;
 const DASHBOARD_WIDTH: f32 = 1100.0;
 const DASHBOARD_HEIGHT: f32 = 760.0;
 
@@ -213,11 +215,23 @@ pub fn run() {
             // The overlay opens first and can open the dashboard.
             let services_for_overlay = services.clone();
             let bounds = Bounds::centered(None, size(px(OVERLAY_WIDTH), px(OVERLAY_HEIGHT)), cx);
+            let bounds = crate::window_state::restore(
+                services.database_path.as_deref(),
+                "overlay",
+                (OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT),
+                bounds,
+                cx,
+            );
             let overlay_options = WindowOptions {
                 show: !cfg!(any(windows, target_os = "macos")),
                 app_id: Some(crate::identity::APP_ID.into()),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(680.0), px(420.0))),
+                display_id: cx
+                    .displays()
+                    .into_iter()
+                    .find(|display| display.bounds().contains(&bounds.center()))
+                    .map(|display| display.id()),
+                window_min_size: Some(size(px(OVERLAY_MIN_WIDTH), px(OVERLAY_MIN_HEIGHT))),
                 // GPUI's Windows renderer always uses alpha composition. Opaque
                 // here disables the separate native accent material, so rendered
                 // surface alpha (including rounded cutouts) remains in control.
@@ -329,7 +343,12 @@ pub fn run() {
                     crate::platform::window::set_visible(window, true);
                     crate::platform::window::focus(window);
                 });
-                let overlay = cx.new(|_| {
+                let geometry_path = services_for_overlay.database_path.clone();
+                let overlay = cx.new(|cx| {
+                    cx.observe_window_bounds(window, move |_, window, _| {
+                        crate::window_state::save(geometry_path.as_deref(), "overlay", window);
+                    })
+                    .detach();
                     Overlay::new(
                         services_for_overlay,
                         shortcut_listener.clone(),
@@ -405,10 +424,22 @@ pub fn open_dashboard_at(
         }
     }
     let bounds = Bounds::centered(None, size(px(DASHBOARD_WIDTH), px(DASHBOARD_HEIGHT)), cx);
+    let bounds = crate::window_state::restore(
+        services.database_path.as_deref(),
+        "dashboard",
+        (960.0, 540.0),
+        bounds,
+        cx,
+    );
     let options = WindowOptions {
         show: !cfg!(any(windows, target_os = "macos")),
         app_id: Some(crate::identity::APP_ID.into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
+        display_id: cx
+            .displays()
+            .into_iter()
+            .find(|display| display.bounds().contains(&bounds.center()))
+            .map(|display| display.id()),
         window_min_size: Some(size(px(960.0), px(540.0))),
         window_background: if cfg!(windows) {
             gpui::WindowBackgroundAppearance::Opaque
@@ -439,7 +470,12 @@ pub fn open_dashboard_at(
         // Each window gets its own connection so a slow page never blocks the
         // overlay's writes.
         let title_config = preferred_chat_config(&services);
-        cx.new(|_| {
+        cx.new(|cx| {
+            let geometry_path = services.database_path.clone();
+            cx.observe_window_bounds(window, move |_, window, _| {
+                crate::window_state::save(geometry_path.as_deref(), "dashboard", window);
+            })
+            .detach();
             let mut view = DashboardView::with_titles(services.connect(), title_config);
             view.navigate_to(route);
             view

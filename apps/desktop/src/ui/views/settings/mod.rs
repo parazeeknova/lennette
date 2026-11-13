@@ -1273,7 +1273,9 @@ pub fn response_settings(
             true,
         ));
     }
-    responses = responses.child(row(theme, "Auto-scroll", "Follow new answers and transcript lines as they arrive", switch("auto-scroll", theme, s.auto_scroll, cx,
+    responses = responses.child(row(theme, "Low latency meetings", "Applies to the next meeting. Save transcripts and answers locally, then sync to web after recording. Speech and AI still use your selected providers.", switch("low-latency", theme, s.low_latency, cx,
+        |view: &mut crate::ui::dashboard::view::DashboardView, _, _| { view.settings_mut().settings.low_latency = !view.settings_mut().settings.low_latency; view.save_settings(); })))
+        .child(row(theme, "Auto-scroll", "Follow new answers and transcript lines as they arrive", switch("auto-scroll", theme, s.auto_scroll, cx,
         |view: &mut crate::ui::dashboard::view::DashboardView, _, _| { view.settings_mut().settings.auto_scroll = !view.settings_mut().settings.auto_scroll; view.save_settings(); })))
         .child(row(theme, "Collapse live transcript by default", "Keep answers visible when a meeting starts. You can expand the transcript during the meeting.", switch("collapse-live-transcript", theme, s.collapse_live_transcript, cx,
         |view: &mut crate::ui::dashboard::view::DashboardView, _, _| { view.settings_mut().settings.collapse_live_transcript = !view.settings_mut().settings.collapse_live_transcript; view.save_settings(); })))

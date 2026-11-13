@@ -32,6 +32,7 @@ mod prompts;
 
 /// Shared dashboard handle. Wrapped so the view owns it.
 pub struct DashboardView {
+    glass_contrast: crate::ui::widgets::glass_contrast::GlassContrast,
     dashboard: Dashboard,
     database: Option<Database>,
     theme: Theme,
@@ -164,6 +165,7 @@ impl DashboardView {
             page_scroll: gpui::ScrollHandle::new(),
             content_width: px(910.0),
             bounds_observer: None,
+            glass_contrast: Default::default(),
             history_search: Default::default(),
             history_queries: Default::default(),
             history_observers: Default::default(),
@@ -2481,9 +2483,6 @@ impl Render for DashboardView {
         if self.dashboard.route() == super::nav::Route::Profiles && self.profile_search.is_none() {
             self.init_profile_search(cx);
         }
-        if let Some(draft) = &self.profile_edit {
-            draft.sync_theme(Theme::from_settings(&self.settings.settings), cx);
-        }
         if self.dashboard.route() == super::nav::Route::Prompts && self.prompt_search.is_none() {
             self.init_prompt_search(cx);
         }
@@ -2493,7 +2492,12 @@ impl Render for DashboardView {
         if self.dashboard.route() == super::nav::Route::Audio && self.devices_task.is_none() {
             self.refresh_audio_devices(cx);
         }
-        self.theme = Theme::from_settings(&self.settings.settings);
+        self.theme = self.glass_contrast.adapt(
+            Theme::from_settings(&self.settings.settings),
+            window,
+            cx,
+            |view| &mut view.glass_contrast,
+        );
         let hidden = self.settings.settings.hide_app_icon || crate::cli::private_overlay_enabled();
         let opacity = if self.settings.settings.backdrop_blur && !self.theme.is_glass() {
             self.settings.settings.transparency as f32 / 100.0
@@ -2560,6 +2564,9 @@ impl Render for DashboardView {
         .flatten()
         {
             crate::ui::widgets::editor::Editor::sync_theme(editor, theme, cx);
+        }
+        if let Some(draft) = &self.profile_edit {
+            draft.sync_theme(theme, cx);
         }
         for editor in self.history_search.iter().flatten() {
             crate::ui::widgets::editor::Editor::sync_theme(editor, theme, cx);

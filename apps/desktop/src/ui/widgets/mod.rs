@@ -3,6 +3,7 @@
 pub mod blur;
 pub mod controls;
 pub mod editor;
+pub mod glass_contrast;
 pub mod markdown;
 pub mod material;
 pub mod motion;

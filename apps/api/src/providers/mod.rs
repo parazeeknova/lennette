@@ -156,7 +156,14 @@ pub struct SpeechQuery {
     pub meeting_id: Uuid,
     #[serde(default)]
     pub offset_seconds: f64,
+    /// Older clients keep live web relay; low latency clients explicitly opt out.
+    #[serde(default = "default_live_relay")]
+    pub relay_live: bool,
 }
+fn default_live_relay() -> bool {
+    true
+}
+
 pub async fn speech(
     State(state): State<AppState>,
     Extension(p): Extension<Principal>,
@@ -169,7 +176,11 @@ pub async fn speech(
     if state.config.deepgram_key.expose_secret().is_empty() {
         return Err(ApiError::Unavailable);
     }
-    own_meeting(&state, &p, Some(q.meeting_id)).await?;
+    // A non-relayed stream may refer to an unsynced local meeting. It never
+    // reads or writes that meeting or publishes its id to the workspace.
+    if q.relay_live {
+        own_meeting(&state, &p, Some(q.meeting_id)).await?;
+    }
     let key = format!("speech:{}", p.account_id);
     let lease = auth::random_token();
     let acquired: Option<String> = state
@@ -241,12 +252,18 @@ pub async fn speech(
             return Err(ApiError::Unavailable);
         }
     };
-    Ok(ws.max_message_size(64*1024).on_upgrade(move |ws|async move{
-        live(&state,&p,Some(q.meeting_id),json!({"type":"meeting_active"})).await;
-        if let Err(error)=pipe_speech(&state,&p,q.meeting_id,q.offset_seconds,ws,upstream,reservation,&key,&lease).await{tracing::debug!(%error,"speech stream ended")}
-        live(&state,&p,Some(q.meeting_id),json!({"type":"meeting_ended"})).await;
+    let relay_header = if q.relay_live { "true" } else { "false" };
+    let mut response = ws.max_message_size(64*1024).on_upgrade(move |ws|async move{
+        if q.relay_live { live(&state,&p,Some(q.meeting_id),json!({"type":"meeting_active"})).await; }
+        if let Err(error)=pipe_speech(&state,&p,q.meeting_id,q.offset_seconds,q.relay_live,ws,upstream,reservation,&key,&lease).await{tracing::debug!(%error,"speech stream ended")}
+        if q.relay_live { live(&state,&p,Some(q.meeting_id),json!({"type":"meeting_ended"})).await; }
         let _:std::result::Result<i64,_>=state.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end",vec![key],vec![lease]).await;
-    }))
+    });
+    response.headers_mut().insert(
+        "x-lennette-relay-live",
+        axum::http::HeaderValue::from_static(relay_header),
+    );
+    Ok(response)
 }
 /// Only Deepgram's documented client controls pass through the managed proxy.
 /// Canonicalize them rather than forwarding arbitrary client JSON upstream.
@@ -273,6 +290,7 @@ async fn pipe_speech(
     p: &Principal,
     meeting: Uuid,
     offset: f64,
+    relay_live: bool,
     mut ws: WebSocket,
     mut upstream: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -293,7 +311,7 @@ async fn pipe_speech(
         tokio::select! {
             _=state.shutdown.cancelled()=>break,
             _=interval.tick()=>{
-                live(state,p,Some(meeting),json!({"type":"meeting_active"})).await;
+                if relay_live { live(state,p,Some(meeting),json!({"type":"meeting_active"})).await; }
                 billing::settle(state,reservation,30).await?;
                 reservation=match billing::reserve(state,p.account_id,"speech",30).await{Ok(id)=>id,Err(_)=>break};
                 chunk_started=tokio::time::Instant::now();
@@ -324,7 +342,7 @@ async fn pipe_speech(
             response=upstream.next()=>match response{
                 Some(Ok(UpstreamMessage::Text(text)))=>{
                     if text.len()>256*1024{break}
-                    if let Ok(event)=serde_json::from_str::<Value>(&text) && event["type"]=="Results" {
+                    if relay_live && let Ok(event)=serde_json::from_str::<Value>(&text) && event["type"]=="Results" {
                         let words=event["channel"]["alternatives"][0]["transcript"].as_str().unwrap_or("").chars().take(8000).collect::<String>();
                         live(state,p,Some(meeting),json!({"type":"transcript","capture_id":capture,"result":{"channel_index":event["channel_index"],"start":event["start"].as_f64().unwrap_or(0.0)+offset,"is_final":event["is_final"],"channel":{"alternatives":[{"transcript":words}]}}})).await;
                     }
@@ -352,6 +370,15 @@ use sea_orm::EntityTrait;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn speech_relay_remains_compatible_and_can_be_disabled_for_local_meetings() {
+        let meeting = Uuid::new_v4();
+        let old: SpeechQuery = serde_json::from_value(json!({"meeting_id": meeting})).unwrap();
+        assert!(old.relay_live);
+        let local: SpeechQuery =
+            serde_json::from_value(json!({"meeting_id": meeting, "relay_live": false})).unwrap();
+        assert!(!local.relay_live);
+    }
     #[test]
     fn gemini_usage_includes_thinking_without_counting_it_twice() {
         let model = plans::MODELS[2];

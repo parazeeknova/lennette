@@ -74,15 +74,22 @@ async fn listen_session(client: &Client) -> Result<(), ()> {
         "Authorization",
         format!("Bearer {token}").parse().map_err(|_| ())?,
     );
-    let (socket, _) = tokio::time::timeout(
+    let connection = tokio::time::timeout(
         Duration::from_secs(10),
         tokio_tungstenite::connect_async(request),
     )
     .await
-    .map_err(|_| ())?
-    .map_err(|error| {
-        if matches!(error, tokio_tungstenite::tungstenite::Error::Http(ref response) if response.status().as_u16() == 401) { client.mark_revoked(); }
-    })?;
+    .map_err(|_| ())?;
+    let (socket, _) = match connection {
+        Ok(connection) => connection,
+        Err(error) => {
+            if matches!(error, tokio_tungstenite::tungstenite::Error::Http(ref response) if response.status().as_u16() == 401)
+            {
+                client.recover_access_token(&token).await.map_err(|_| ())?;
+            }
+            return Err(());
+        }
+    };
     // Reconcile after connecting, covering changes during a network outage.
     REMOTE_CHANGE.store(true, Ordering::Release);
     receive_notifications(

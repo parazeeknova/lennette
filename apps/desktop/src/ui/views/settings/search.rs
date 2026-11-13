@@ -3,6 +3,11 @@ use super::*;
 
 const INDEX: &[(Route, &str, &str)] = &[
     (
+        Route::Responses,
+        "Low latency meetings",
+        "local transcript answers sync web after recording streaming",
+    ),
+    (
         Route::Settings,
         "Theme",
         "appearance palette light dark glass",

@@ -9,6 +9,7 @@ pub(super) struct ProfileDraft {
     name: gpui::Entity<Editor>,
     personal: gpui::Entity<Editor>,
     meeting: gpui::Entity<Editor>,
+    observers: Vec<gpui::Subscription>,
 }
 
 impl ProfileDraft {
@@ -49,6 +50,7 @@ impl DashboardView {
             meeting_context: String::new(),
         });
         self.profile_edit = Some(ProfileDraft {
+            observers: Vec::new(),
             id: profile.id,
             is_new,
             name: cx.new(|cx| {
@@ -59,17 +61,24 @@ impl DashboardView {
             }),
             personal: cx.new(|cx| {
                 let mut editor = Editor::new(&profile.personal_context, self.theme, cx);
+                editor.min_height = 300.0;
                 editor.placeholder = "Your role, experience, strengths and useful background...";
                 editor
             }),
             meeting: cx.new(|cx| {
                 let mut editor = Editor::new(&profile.meeting_context, self.theme, cx);
+                editor.min_height = 300.0;
                 editor.placeholder =
                     "Who you are meeting, the topic, goals and details to remember...";
                 editor
             }),
         });
-        if let Some(draft) = &self.profile_edit {
+        if let Some(draft) = &mut self.profile_edit {
+            for editor in [&draft.personal, &draft.meeting] {
+                draft
+                    .observers
+                    .push(cx.observe(editor, |_, _, cx| cx.notify()));
+            }
             draft.name.read(cx).focus(window);
         }
         self.profile_delete = None;
@@ -131,23 +140,18 @@ impl DashboardView {
         let theme = self.theme;
         let surfaces = self.surfaces();
         let available = (f32::from(window.viewport_size().width) - 48.0).clamp(300.0, 960.0);
-        let columns = if available >= 900.0 {
-            3
-        } else if available >= 700.0 {
-            2
-        } else {
-            1
-        };
         let mut body = div()
             .flex()
             .flex_col()
             .w_full()
             .min_w(px(0.0))
-            .gap(px(20.0));
+            .gap(px(24.0))
+            .text_color(theme.foreground);
         if self.profile_edit.is_some() {
-            body = body.child(
-                self.page_heading("Profiles", "Edit the context for your next conversation."),
-            );
+            body = body.child(self.page_heading(
+                "Context studio",
+                "Shape what Lennette knows before your next conversation.",
+            ));
         }
         if let Some(error) = &self.settings.error {
             body = body.child(crate::ui::controls::warning(&theme, error));
@@ -202,6 +206,15 @@ impl DashboardView {
                                 .text_color(theme.muted_foreground)
                                 .child(subtitle),
                         )
+                        .child(
+                            div()
+                                .text_size(scaled(11.0))
+                                .text_color(theme.muted_foreground)
+                                .child(format!(
+                                    "{} / 16,000 characters",
+                                    editor.read(cx).input.text().chars().count()
+                                )),
+                        )
                         .child(editor.clone()),
                 );
             }
@@ -223,7 +236,7 @@ impl DashboardView {
                 .child(div().flex().items_start().gap(px(8.0)).pb(px(12.0))
                     .child(icons::icon(&theme, Icon::Info, 13.0))
                     .child(div().text_size(scaled(11.0)).text_color(theme.muted_foreground).whitespace_normal()
-                        .child("Saved on this computer. Select a profile to include it in AI requests. Edits apply to the next answer; files and transcripts remain separate.")));
+                        .child("Select a profile to include this context in AI requests. Changes apply to the next answer. Connected accounts sync saved profiles to your workspace.")));
             return body
                 .child(crate::ui::widgets::motion::reveal(
                     form,
@@ -240,8 +253,8 @@ impl DashboardView {
         body = body
             .child(
                 self.collection_header(
-                    "Profiles",
-                    "Useful background for your next conversation.",
+                    "Context studio",
+                    "Your background. Their agenda. A prepared assistant for every conversation.",
                     div()
                         .flex()
                         .items_center()
@@ -288,14 +301,13 @@ impl DashboardView {
                                 div()
                                     .text_size(scaled(10.5))
                                     .text_color(theme.muted_foreground)
-                                    .child("Selected context"),
+                                    .child("ACTIVE PROFILE · USED IN YOUR NEXT ANSWER"),
                             )
                             .child(
                                 div().text_size(scaled(12.0)).truncate().child(
-                                    selected
-                                        .as_ref()
-                                        .map(|p| p.name.clone())
-                                        .unwrap_or_else(|| "No context".into()),
+                                    selected.as_ref().map(|p| p.name.clone()).unwrap_or_else(
+                                        || "Choose a profile below to get started".into(),
+                                    ),
                                 ),
                             ),
                     )
@@ -303,7 +315,7 @@ impl DashboardView {
                         action_button(
                             "clear-profile-selection",
                             &theme,
-                            "Use no context",
+                            "Clear selection",
                             cx,
                             |this, _, _| {
                                 if let Some(db) = &this.database {
@@ -370,29 +382,31 @@ impl DashboardView {
                     }
                 )),
         );
-        let width = (available - (columns - 1) as f32 * 14.0) / columns as f32;
-        let mut grid = div().flex().flex_wrap().w_full().gap(px(14.0));
+        let mut grid = div().flex().flex_col().w_full().gap(px(18.0));
         for profile in matching {
             let active = selected
                 .as_ref()
                 .is_some_and(|selected| selected.id == profile.id);
             let editing = profile.clone();
+            let duplicate = profile.clone();
             let using = profile.id.clone();
             let deleting = profile.id.clone();
             let confirming = self.profile_delete.as_ref() == Some(&profile.id);
             let mut card = div()
                 .flex()
                 .flex_col()
-                .w(px(width))
-                .h(scaled(300.0))
-                .min_h(px(300.0))
+                .w_full()
                 .min_w(px(0.0))
                 .gap(px(12.0))
-                .p(px(16.0))
-                .rounded(px(14.0))
+                .p(px(20.0))
+                .rounded(px(16.0))
                 .border_1()
                 .border_color(theme.control_border(active))
-                .bg(surfaces.card())
+                .bg(if active {
+                    surfaces.input()
+                } else {
+                    surfaces.card()
+                })
                 .child(
                     div()
                         .flex()
@@ -425,17 +439,23 @@ impl DashboardView {
                                 .child("Selected")
                         })),
                 )
-                .child(context_preview(
-                    theme,
-                    "About you",
-                    &profile.personal_context,
-                ))
-                .child(context_preview(
-                    theme,
-                    "Meeting context",
-                    &profile.meeting_context,
-                ))
-                .child(div().flex_1().min_h(px(0.0)));
+                .child({
+                    let mut sections = div().flex().w_full().min_w(px(0.0)).gap(px(16.0));
+                    if available < 760.0 {
+                        sections = sections.flex_col();
+                    }
+                    sections
+                        .child(context_preview(
+                            theme,
+                            "ABOUT YOU",
+                            &profile.personal_context,
+                        ))
+                        .child(context_preview(
+                            theme,
+                            "MEETING BRIEF",
+                            &profile.meeting_context,
+                        ))
+                });
             if confirming {
                 card = card.child(
                     div()
@@ -506,6 +526,23 @@ impl DashboardView {
                                         this.edit_profile(Some(editing.clone()), cx, window)
                                     },
                                 ))
+                                .child(action_button(
+                                    gpui::ElementId::Name(
+                                        format!("duplicate-profile-{}", profile.id).into(),
+                                    ),
+                                    &theme,
+                                    "Duplicate",
+                                    cx,
+                                    move |this, cx, window| {
+                                        let mut copy = duplicate.clone();
+                                        copy.id = uuid::Uuid::new_v4().to_string();
+                                        copy.name = format!("{} copy", copy.name);
+                                        this.edit_profile(Some(copy), cx, window);
+                                        if let Some(draft) = &mut this.profile_edit {
+                                            draft.is_new = true;
+                                        }
+                                    },
+                                ))
                                 .child(
                                     div()
                                         .id(gpui::ElementId::Name(
@@ -542,38 +579,36 @@ impl DashboardView {
 }
 
 fn context_preview(theme: Theme, title: &'static str, text: &str) -> impl IntoElement {
-    let bounded = text.chars().take(240).collect::<String>();
-    let excerpt = bounded
-        .split_whitespace()
-        .take(36)
-        .collect::<Vec<_>>()
-        .join(" ");
+    let excerpt = text.chars().take(600).collect::<String>();
+    let excerpt = if text.chars().count() > 600 {
+        format!("{excerpt}…")
+    } else {
+        excerpt
+    };
     div()
         .flex()
         .flex_col()
-        .flex_shrink_0()
-        .gap(px(5.0))
-        .h(scaled(65.0))
-        .overflow_hidden()
+        .flex_1()
+        .min_w(px(0.0))
+        .gap(px(8.0))
+        .p(px(14.0))
+        .rounded(px(10.0))
+        .bg(theme.surfaces(1.0).muted())
         .child(
             div()
                 .text_size(scaled(10.0))
-                .font_weight(FontWeight::MEDIUM)
+                .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.muted_foreground)
                 .child(title),
         )
         .child(
             div()
-                .text_size(scaled(11.0))
-                .line_height(scaled(16.0))
+                .text_size(scaled(12.0))
+                .line_height(scaled(19.0))
                 .whitespace_normal()
-                .text_color(if excerpt.is_empty() {
-                    theme.muted_foreground
-                } else {
-                    theme.foreground
-                })
-                .child(if excerpt.is_empty() {
-                    "No context added yet".to_owned()
+                .text_color(theme.foreground)
+                .child(if excerpt.trim().is_empty() {
+                    "No context yet. Edit this profile to add it.".to_owned()
                 } else {
                     excerpt
                 }),

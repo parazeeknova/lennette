@@ -331,6 +331,7 @@ fn meaningful_remark(text: &str) -> bool {
 }
 
 pub struct Overlay {
+    glass_contrast: crate::ui::widgets::glass_contrast::GlassContrast,
     services: crate::app::Services,
     database: Option<std::rc::Rc<crate::db::Database>>,
     configuration_version: Option<(i64, Option<std::time::SystemTime>, u64)>,
@@ -616,6 +617,7 @@ impl Overlay {
             .unwrap_or_default();
         Self {
             services,
+            glass_contrast: Default::default(),
             database,
             configuration_version: None,
             managed_session: None,
@@ -866,6 +868,9 @@ impl Overlay {
             speech: self.speech.clone(),
         };
         let events = self.prepare_capture(config);
+        if self.is_listening() {
+            crate::managed::defer_meeting_sync(self.runtime_settings.low_latency);
+        }
         self.meeting_id = None;
         for event in events {
             self.handle_session_event(event);
@@ -1052,6 +1057,7 @@ impl Overlay {
                 if let Some(id) = overlay.finishing_meeting_id.take() {
                     overlay.finish_meeting_artifacts(id, cx);
                 }
+                crate::managed::defer_meeting_sync(false);
                 cx.notify();
             })
             .ok();
@@ -1288,6 +1294,8 @@ impl Overlay {
         if self.transcription_busy && id.is_some() {
             self.finishing_meeting_id = id.clone();
             self.finishing_meeting_offsets = (self.meeting_offset, self.meeting_speaker_offset);
+        } else {
+            crate::managed::defer_meeting_sync(false);
         }
         id
     }
@@ -2414,6 +2422,8 @@ impl Overlay {
         let recording = self.is_listening();
         let mut pill = div()
             .id("session-pill")
+            .max_w_full()
+            .min_w(px(0.0))
             .relative()
             .window_control_area(gpui::WindowControlArea::Drag)
             .cursor(gpui::CursorStyle::OpenHand)
@@ -3111,6 +3121,7 @@ impl Overlay {
                 self.transcript_collapsed = None;
             }
             self.runtime_settings = settings.clone();
+
             if self.model_provider.as_deref() != Some(settings.chat_provider.as_str())
                 && let Some((id, model)) = self
                     .chat_choices
@@ -3918,9 +3929,11 @@ impl Overlay {
                 .text_size(scaled(11.0))
                 .line_height(scaled(15.0))
                 .whitespace_normal()
-                .text_color(theme.muted_foreground)
+                .text_color(theme.foreground)
                 .cursor_pointer()
-                .hover(|style| style.underline().text_color(theme.foreground))
+                .rounded(px(6.0))
+                .px(px(6.0))
+                .hover(|style| style.bg(theme.menu_hover()))
                 .child(icons::icon(&theme, Icon::ArrowUpRight, 10.0))
                 .child(
                     div()
@@ -3963,8 +3976,8 @@ impl Overlay {
                 div()
                     .flex_shrink_0()
                     .pt(px(2.0))
-                    .font_weight(FontWeight::BOLD)
-                    .text_size(scaled(10.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(scaled(11.0))
                     .text_color(theme.foreground)
                     .child("Follow-ups"),
             )
@@ -3977,7 +3990,7 @@ impl Overlay {
                     .gap(px(4.0))
                     .pt(px(2.0))
                     .text_size(scaled(11.0))
-                    .text_color(theme.muted_foreground)
+                    .text_color(theme.foreground)
                     .cursor_pointer()
                     .id("edit-follow-ups")
                     .child(icons::icon(&theme, Icon::RefreshCw, 12.0))
@@ -4031,6 +4044,7 @@ impl Overlay {
     fn profile_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("profile-select")
+            .min_w(px(0.0))
             .occlude()
             .relative()
             .flex()
@@ -4045,7 +4059,7 @@ impl Overlay {
             .text_size(scaled(11.0))
             .text_color(self.theme.foreground)
             .child(
-                div().max_w(px(95.0)).truncate().child(
+                div().min_w(px(0.0)).max_w(px(95.0)).truncate().child(
                     self.active_profile
                         .as_ref()
                         .map(|p| p.name.clone())
@@ -4425,6 +4439,7 @@ impl Overlay {
             });
         div()
             .id("model-select")
+            .min_w(px(0.0))
             .occlude()
             .relative()
             .flex()
@@ -4444,7 +4459,13 @@ impl Overlay {
                 self.model.as_deref().unwrap_or_default(),
                 13.0,
             ))
-            .child(div().max_w(px(150.0)).truncate().child(label))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .max_w(px(150.0))
+                    .truncate()
+                    .child(label),
+            )
             .child(icons::icon(&self.theme, Icon::ChevronDown, 10.0))
             .child(menu_probe(self.model_bounds.clone(), cx))
             .on_click(cx.listener(|this, _, window, cx| {
@@ -4474,6 +4495,7 @@ impl Overlay {
         let (icon, _) = menus::mode_presentation(&name);
         div()
             .id("prompt-mode")
+            .min_w(px(0.0))
             .occlude()
             .relative()
             .flex()
@@ -5668,6 +5690,12 @@ fn render_markdown_blocks(
 
 impl Render for Overlay {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.theme = self.glass_contrast.adapt(
+            Theme::from_settings(&self.runtime_settings),
+            window,
+            cx,
+            |view| &mut view.glass_contrast,
+        );
         if self.quit_pending && !self.transcription_busy {
             cx.quit();
         }
@@ -5966,6 +5994,7 @@ impl Render for Overlay {
 
 impl Drop for Overlay {
     fn drop(&mut self) {
+        crate::managed::defer_meeting_sync(false);
         if let Some(cancel) = self.chat_cancel.take() {
             let _ = cancel.send(true);
         }

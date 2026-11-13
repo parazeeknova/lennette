@@ -579,7 +579,8 @@ fn queue_native(
 /// Runs after GPUI releases its App borrow, before showing a protected window.
 #[cfg(windows)]
 pub fn prepare_native(window: &Window, cx: &gpui::App) {
-    let app = cx.to_async();
+    let mut app = cx.to_async();
+    let identity = window.window_handle();
     queue_native(window, cx, move |handle| {
         configure_win32_frame(handle);
         if let Err(error) = protect_win32(handle) {
@@ -591,9 +592,15 @@ pub fn prepare_native(window: &Window, cx: &gpui::App) {
             let _ = app.update(|cx| cx.quit());
             return;
         }
-        if set_visible_win32(handle, true).is_yes() {
-            focus_win32(handle);
-        }
+        // A GPUI window created with show=false still has Windows' arbitrary
+        // CW_USEDEFAULT geometry. Its requested bounds remain pending until
+        // GPUI activates it. Native ShowWindow alone bypasses that placement.
+        // Consume the placement after applying capture protection, then queue
+        // visibility behind GPUI's native activation task.
+        let _ = identity.update(&mut app, |_, window, cx| {
+            window.activate_window();
+            queue_visibility(window, cx, true, true);
+        });
     });
 }
 

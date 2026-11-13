@@ -198,6 +198,7 @@ async fn cleanup(state: AppState, id: Uuid) {
 #[ignore = "requires local Postgres and Redis"]
 async fn auth_rotation_replay_revocation_and_health() {
     let (s, app, id, t) = fixture().await;
+    let socket_principal = auth::authenticate(&s, &t.access_token).await.unwrap();
     assert_eq!(
         request(&app, "GET", "/health/ready", None, json!({}))
             .await
@@ -224,6 +225,10 @@ async fn auth_rotation_replay_revocation_and_health() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let rotated: lennette_protocol::Tokens = serde_json::from_value(value).unwrap();
+    assert!(
+        auth::validate_session(&s, &socket_principal).await.is_ok(),
+        "Token rotation must not revoke an established connection"
+    );
     assert_eq!(
         request(&app, "GET", "/v1/me", Some(&t.access_token), json!({}))
             .await
@@ -242,6 +247,24 @@ async fn auth_rotation_replay_revocation_and_health() {
         .0,
         StatusCode::OK
     );
+    let (retry_status, retried) = request(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        json!({"refresh_token":t.refresh_token}),
+    )
+    .await;
+    assert_eq!(retry_status, StatusCode::OK);
+    assert_eq!(retried["access_token"], rotated.access_token);
+    assert_eq!(retried["refresh_token"], rotated.refresh_token);
+    assert!(auth::authenticate(&s, &rotated.access_token).await.is_ok());
+    // Expire the bounded retry window without slowing the test down.
+    let _: i64 = s
+        .redis
+        .del(format!("refresh-retry:{}", auth::digest(&t.refresh_token)))
+        .await
+        .unwrap();
     assert_eq!(
         request(
             &app,
@@ -266,6 +289,7 @@ async fn auth_rotation_replay_revocation_and_health() {
         .0,
         StatusCode::UNAUTHORIZED
     );
+    assert!(auth::validate_session(&s, &socket_principal).await.is_err());
     cleanup(s, id).await;
 }
 #[tokio::test]

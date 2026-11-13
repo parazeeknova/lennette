@@ -25,6 +25,9 @@ pub(super) async fn upload_pending(client: &Client, db: &Database) -> Result<(),
     let rows:Vec<(String,String,String,String)>=db.connection().prepare("SELECT b.id,b.name,b.content_type,b.payload FROM cloud_blob_queue q JOIN cloud_blobs b ON b.id=q.id LIMIT 4").map_err(|e|e.to_string())?.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(|e|e.to_string())?.collect::<crate::db::Result<_>>().map_err(|e|e.to_string())?;
     let account = client.account_id().await;
     for (id, name, content_type, payload) in rows {
+        if meeting_sync_deferred() {
+            break;
+        }
         let remote = Uuid::new_v5(&account, format!("blob:{id}").as_bytes());
         let mut url = client.url("/v1/attachments").map_err(|e| e.to_string())?;
         url.query_pairs_mut()
@@ -32,16 +35,14 @@ pub(super) async fn upload_pending(client: &Client, db: &Database) -> Result<(),
             .append_pair("name", &name)
             .append_pair("content_type", &content_type);
         let bytes = STANDARD.decode(&payload).map_err(|e| e.to_string())?;
-        let token = client.access_token().await.map_err(|e| e.to_string())?;
-        let response = client
-            .http
-            .post(url)
-            .bearer_auth(token)
-            .body(bytes)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        lennette_sync_client::checked(response)
+        client
+            .send(|token| {
+                client
+                    .http
+                    .post(url.clone())
+                    .bearer_auth(token)
+                    .body(bytes.clone())
+            })
             .await
             .map_err(|e| e.to_string())?;
         let tx = db

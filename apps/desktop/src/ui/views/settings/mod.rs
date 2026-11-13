@@ -1275,6 +1275,8 @@ pub fn response_settings(
     }
     responses = responses.child(row(theme, "Auto-scroll", "Follow new answers and transcript lines as they arrive", switch("auto-scroll", theme, s.auto_scroll, cx,
         |view: &mut crate::ui::dashboard::view::DashboardView, _, _| { view.settings_mut().settings.auto_scroll = !view.settings_mut().settings.auto_scroll; view.save_settings(); })))
+        .child(row(theme, "Collapse live transcript by default", "Keep answers visible when a meeting starts. You can expand the transcript during the meeting.", switch("collapse-live-transcript", theme, s.collapse_live_transcript, cx,
+        |view: &mut crate::ui::dashboard::view::DashboardView, _, _| { view.settings_mut().settings.collapse_live_transcript = !view.settings_mut().settings.collapse_live_transcript; view.save_settings(); })))
         .child(row(theme, "Auto recap when a meeting ends", "Save a summary, decisions and action items beside its transcript", switch("auto-recap", theme, s.auto_recap, cx,
         |view: &mut crate::ui::dashboard::view::DashboardView, _, _| { view.settings_mut().settings.auto_recap = !view.settings_mut().settings.auto_recap; view.save_settings(); })))
         .child(help_text(theme, "Auto recap sends the finished transcript to your selected AI provider in one additional request. It waits for the final words and saves the result to that meeting."));

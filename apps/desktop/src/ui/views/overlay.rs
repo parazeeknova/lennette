@@ -423,6 +423,8 @@ pub struct Overlay {
     /// Live transcript lines for the current Listen session.
     transcript: Vec<TranscriptEntry>,
     transcript_revision: usize,
+    /// Per-meeting visibility override; otherwise follow the saved preference.
+    transcript_collapsed: Option<bool>,
     /// Meeting row for the running session.
     meeting_id: Option<String>,
     /// Speech provider config, resolved when the session starts.
@@ -684,6 +686,7 @@ impl Overlay {
             runtime_settings,
             transcript: Vec::new(),
             transcript_revision: 0,
+            transcript_collapsed: None,
             meeting_id: None,
             speech: None,
             chat: crate::features::chat_session::ChatSession::new(),
@@ -832,6 +835,7 @@ impl Overlay {
         self.runtime_settings =
             crate::core::settings::Settings::load_from_path(self.services.database_path.as_deref())
                 .unwrap_or_default();
+        self.transcript_collapsed = None;
 
         self.live_active = [false; 2];
         self.microphone_activity = None;
@@ -2126,6 +2130,7 @@ impl Overlay {
         self.user_scrolled = false;
         // Transcript and live speech belong to the session that just ended.
         self.transcript.clear();
+        self.transcript_collapsed = None;
         self.live_interim = Default::default();
         self.live_turns = Default::default();
         self.live_speaking = None;
@@ -3081,6 +3086,9 @@ impl Overlay {
             if !settings.smart_follow_ups {
                 self.cancel_follow_ups();
             }
+            if self.runtime_settings.collapse_live_transcript != settings.collapse_live_transcript {
+                self.transcript_collapsed = None;
+            }
             self.runtime_settings = settings.clone();
             if self.model_provider.as_deref() != Some(settings.chat_provider.as_str())
                 && let Some((id, model)) = self
@@ -3354,7 +3362,12 @@ impl Overlay {
         }
     }
 
-    /// The Listen tab's body: the words you hear in the top half, answers below.
+    fn live_transcript_collapsed(&self) -> bool {
+        self.transcript_collapsed
+            .unwrap_or(self.runtime_settings.collapse_live_transcript)
+    }
+
+    /// The Listen tab's body: an optional transcript above the answers.
     fn listen_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.shows_transcript() {
             return self.message_list(cx).into_any_element();
@@ -3363,26 +3376,62 @@ impl Overlay {
         self.keep_transcript_at_bottom();
 
         let divider = self.surfaces().border();
-        let transcript: gpui::AnyElement = self.transcript_panel().into_any_element();
+        let collapsed = self.live_transcript_collapsed();
         let answers: gpui::AnyElement = self.message_list(cx).into_any_element();
 
-        div()
+        let mut body = div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h(px(0.0))
             .px(px(space::SM))
-            .child(transcript)
             .child(
                 div()
-                    .h(px(1.0))
-                    .mx(px(space::MD))
-                    .mt(px(space::MD))
+                    .id("toggle-live-transcript")
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
                     .flex_shrink_0()
-                    .bg(divider),
-            )
-            .child(answers)
-            .into_any_element()
+                    .px(px(space::MD))
+                    .py(px(space::SM))
+                    .text_size(scaled(11.0))
+                    .text_color(self.theme.muted_foreground)
+                    .cursor_pointer()
+                    .child(icons::icon(
+                        &self.theme,
+                        if collapsed {
+                            Icon::ChevronRight
+                        } else {
+                            Icon::ChevronDown
+                        },
+                        12.0,
+                    ))
+                    .child(if collapsed {
+                        "Show transcript"
+                    } else {
+                        "Hide transcript"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.transcript_collapsed = Some(!this.live_transcript_collapsed());
+                        if !this.live_transcript_collapsed() && this.runtime_settings.auto_scroll {
+                            this.transcript_scroll.scroll_to_bottom();
+                        }
+                        cx.notify();
+                    })),
+            );
+        if !collapsed {
+            body = body
+                .child(self.transcript_panel().into_any_element())
+                .child(
+                    div()
+                        .h(px(1.0))
+                        .mx(px(space::MD))
+                        .mt(px(space::MD))
+                        .flex_shrink_0()
+                        .bg(divider),
+                );
+        }
+        body.child(answers).into_any_element()
     }
 
     fn show_empty_wordmark(&self) -> bool {
@@ -6944,6 +6993,34 @@ mod tests {
         )));
         overlay.keep_transcript_at_bottom();
         assert_eq!(overlay.transcript_tail, (1, 0));
+
+        drop(overlay);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn transcript_visibility_follows_preference_and_resets_for_a_new_chat() {
+        let (path, mut overlay) = fixture();
+        overlay.push_transcript(
+            "Can you explain the migration plan?".into(),
+            0.0,
+            1.0,
+            1,
+            None,
+        );
+        assert!(overlay.live_transcript_collapsed());
+        assert!(overlay.selected_system_prompt().contains("migration plan"));
+        overlay.transcript_collapsed = Some(false);
+        assert!(!overlay.live_transcript_collapsed());
+        assert_eq!(overlay.transcript.len(), 1);
+
+        overlay.runtime_settings.collapse_live_transcript = false;
+        overlay.transcript_collapsed = None;
+        assert!(!overlay.live_transcript_collapsed());
+        overlay.transcript_collapsed = Some(true);
+        assert!(overlay.live_transcript_collapsed());
+        overlay.new_chat();
+        assert!(!overlay.live_transcript_collapsed());
 
         drop(overlay);
         std::fs::remove_dir_all(path).unwrap();

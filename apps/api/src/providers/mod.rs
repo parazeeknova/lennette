@@ -1,14 +1,14 @@
 mod batch;
+mod chat;
 use crate::{
     auth::{self, Principal},
     billing,
     error::{ApiError, Result},
-    plans::MODELS,
+    plans,
     state::AppState,
 };
 use axum::{
     Extension, Json,
-    body::{Body, Bytes},
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -133,114 +133,23 @@ pub async fn live(state: &AppState, p: &Principal, meeting: Option<Uuid>, event:
     crate::workspace::realtime::publish(state, p, meeting, event).await;
 }
 
-pub async fn chat(
-    State(state): State<AppState>,
-    Extension(p): Extension<Principal>,
-    Json(request): Json<ChatRequest>,
-) -> Result<Response> {
-    if state.config.merge_key.expose_secret().is_empty() {
-        return Err(ApiError::Unavailable);
-    }
-    if request.stream == Some(false) {
-        return Err(ApiError::BadRequest(
-            "managed chat requires streaming".into(),
-        ));
-    }
-    let model = *MODELS
-        .iter()
-        .find(|m| m.id == request.model)
-        .ok_or_else(|| ApiError::BadRequest("model is not in the managed catalog".into()))?;
-    let (plan, _) = billing::entitlement(&state.db, p.account_id).await?;
-    if model.plus_only && plan.id != "managed_plus" {
-        return Err(ApiError::PaymentRequired);
-    }
-    own_meeting(&state, &p, request.meeting_id).await?;
-    let input = validate_messages(&request.messages)?;
-    let max_tokens = request.max_tokens.unwrap_or(2048);
-    if !(1..=4096).contains(&max_tokens) {
-        return Err(ApiError::BadRequest("max_tokens must be 1 to 4096".into()));
-    }
-    state
-        .limit(format!("chat:{}", p.account_id), 30, 60)
-        .await?;
-    let reservation =
-        billing::reserve(&state, p.account_id, "ai", model.cost(input, max_tokens)).await?;
-    let messages: Vec<Value> = request
-        .messages
-        .into_iter()
-        .map(|m| json!({"role":m.role,"content":m.content}))
-        .collect();
-    let mut payload = json!({"model":model.id,"messages":messages,"stream":true,"max_tokens":max_tokens,"stream_options":{"include_usage":true}});
-    if let Some(effort) = request.reasoning_effort {
-        if !matches!(effort.as_str(), "none" | "low" | "medium") {
-            billing::settle(&state, reservation, 0).await?;
-            return Err(ApiError::BadRequest("unsupported reasoning effort".into()));
-        }
-        payload["reasoning_effort"] = json!(effort);
-    }
-    let upstream = state
-        .http
-        .post(state.config.merge_url.clone())
-        .bearer_auth(state.config.merge_key.expose_secret())
-        .json(&payload)
-        .send()
-        .instrument(tracing::info_span!(
-            "merge.chat",
-            otel.kind = "client",
-            server.address = state.config.merge_url.host_str().unwrap_or("merge")
-        ))
-        .await?;
-    if !upstream.status().is_success() {
-        billing::settle(&state, reservation, 0).await?;
-        return Err(ApiError::Unavailable);
-    }
-    let relay = request.relay_live.unwrap_or(true);
-    let prompt = messages
-        .iter()
-        .rev()
-        .find(|m| m["role"] == "user")
-        .and_then(|m| m["content"].as_str())
-        .unwrap_or("")
-        .chars()
-        .take(4000)
-        .collect::<String>();
-    let stream = async_stream::stream! {
-        let mut upstream=upstream.bytes_stream();let mut pending=Vec::new();let mut usage=None;let mut done=false;let mut output=String::new();let stream_id=Uuid::new_v4();
-        if relay { live(&state,&p,request.meeting_id,json!({"type":"ai_start","stream_id":stream_id,"conversation_id":request.conversation_id,"prompt":prompt})).await; }
-        while let Some(chunk)=tokio::select!{chunk=upstream.next()=>chunk,_=state.shutdown.cancelled()=>None}{
-            let chunk=match chunk{Ok(c)=>c,Err(_)=>break};
-            pending.extend_from_slice(&chunk);
-            if pending.len()>512*1024{break}
-            while let Some(end)=pending.iter().position(|b|*b==b'\n'){
-                let line:Vec<u8>=pending.drain(..=end).collect();
-                if let Ok(text)=std::str::from_utf8(&line) && let Some(data)=text.trim().strip_prefix("data:"){
-                    if data.trim()=="[DONE]"{done=true;}
-                    else if let Ok(event)=serde_json::from_str::<Value>(data){
-                        if let (Some(input),Some(output))=(event["usage"]["prompt_tokens"].as_i64(),event["usage"]["completion_tokens"].as_i64()) && input>=0 && output>=0{usage=Some(model.cost(input,output));}
-                        if let Some(delta)=event["choices"][0]["delta"]["content"].as_str(){
-                            output.push_str(delta);
-                            if relay { live(&state,&p,request.meeting_id,json!({"type":"ai_delta","stream_id":stream_id,"conversation_id":request.conversation_id,"offset":output.len().saturating_sub(delta.len()),"delta":delta})).await; }
-                        }
-                    }
-                }
-                if done && let Some(cost)=usage && let Err(e)=billing::settle(&state,reservation,cost).await{tracing::error!(%e,"AI usage settlement failed")}
-                yield Ok::<Bytes,std::io::Error>(Bytes::from(line));
-            }
-            if output.len()>1024*1024{break}
-        }
-        if done && let Some(cost)=usage && let Err(e)=billing::settle(&state,reservation,cost).await{tracing::error!(%e,"AI usage settlement failed")}
-        if relay { live(&state,&p,request.meeting_id,json!({"type":"ai_done","stream_id":stream_id,"conversation_id":request.conversation_id,"total_bytes":output.len(),"complete":done})).await; }
-    };
-    Ok((
-        [
-            (header::CONTENT_TYPE, "text/event-stream"),
-            (header::CACHE_CONTROL, "no-cache, no-transform"),
-            (header::HeaderName::from_static("x-accel-buffering"), "no"),
-        ],
-        Body::from_stream(stream),
-    )
-        .into_response())
+fn usage_cost(model: plans::Model, usage: &Value) -> Option<i64> {
+    let input = usage["prompt_tokens"].as_i64().filter(|n| *n >= 0)?;
+    let completion = usage["completion_tokens"].as_i64().filter(|n| *n >= 0)?;
+    // Gemini can omit thinking tokens from completion_tokens while including
+    // them in total_tokens. Bill all generated tokens without double counting.
+    let output = usage["total_tokens"]
+        .as_i64()
+        .filter(|total| *total >= input)
+        .map_or(completion, |total| completion.max(total - input));
+    let cached = usage["prompt_tokens_details"]["cached_tokens"]
+        .as_i64()
+        .unwrap_or(0)
+        .max(usage["prompt_cache_hit_tokens"].as_i64().unwrap_or(0));
+    Some(model.cost_with_cached(input, output, cached))
 }
+
+pub use chat::chat;
 
 #[derive(Deserialize)]
 pub struct SpeechQuery {
@@ -443,6 +352,54 @@ use sea_orm::EntityTrait;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gemini_usage_includes_thinking_without_counting_it_twice() {
+        let model = plans::MODELS[2];
+        assert_eq!(
+            usage_cost(
+                model,
+                &json!({"prompt_tokens":1000,"completion_tokens":100,"total_tokens":1600})
+            ),
+            Some(model.cost(1000, 600))
+        );
+        assert_eq!(
+            usage_cost(
+                model,
+                &json!({"prompt_tokens":1000,"completion_tokens":600,"total_tokens":1600})
+            ),
+            Some(model.cost(1000, 600))
+        );
+        assert_eq!(
+            usage_cost(
+                model,
+                &json!({"prompt_tokens":1000,"completion_tokens":100})
+            ),
+            Some(model.cost(1000, 100))
+        );
+        assert_eq!(
+            usage_cost(model, &json!({"prompt_tokens":-1,"completion_tokens":10})),
+            None
+        );
+    }
+    #[test]
+    fn deepseek_cache_tokens_are_discounted_for_both_usage_formats() {
+        let model = *plans::MODELS.last().unwrap();
+        let expected = Some(model.cost_with_cached(1000, 200, 500));
+        assert_eq!(
+            usage_cost(
+                model,
+                &json!({"prompt_tokens":1000,"completion_tokens":200,"total_tokens":1200,"prompt_tokens_details":{"cached_tokens":500}})
+            ),
+            expected
+        );
+        assert_eq!(
+            usage_cost(
+                model,
+                &json!({"prompt_tokens":1000,"completion_tokens":200,"total_tokens":1200,"prompt_cache_hit_tokens":500})
+            ),
+            expected
+        );
+    }
     #[test]
     fn speech_controls_allow_keepalive_and_close_without_arbitrary_payloads() {
         assert_eq!(

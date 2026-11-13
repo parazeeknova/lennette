@@ -353,20 +353,20 @@ async fn deleting_a_conversation_erases_replay_content_and_children_even_after_e
 
 #[tokio::test]
 #[ignore = "requires local Postgres and Redis"]
-async fn merge_streaming_settles_usage_before_done_and_never_exposes_provider_key() {
+async fn gemini_streaming_settles_usage_before_done_and_never_exposes_provider_key() {
     let (state, _, id, t) = fixture().await;
     subscribe(&state, id).await;
     let mock=Router::new().route("/chat",post(|headers:HeaderMap,Json(body):Json<Value>|async move{
-        assert_eq!(headers["authorization"],"Bearer mock-merge-key");assert_eq!(body["model"],"openai/gpt-6-luna");assert_eq!(body["stream_options"]["include_usage"],true);
-        ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n")
+        assert_eq!(headers["authorization"],"Bearer mock-gemini-key");assert_eq!(body["model"],"gemini-3.5-flash-lite");assert_eq!(body["stream_options"]["include_usage"],true);assert_eq!(body["reasoning_effort"],"low");
+        ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":3,\"total_tokens\":48}}\n\ndata: [DONE]\n\n")
     }));
     let (base, task) = serve(mock).await;
     let mut config = state.config.clone();
-    config.merge_key = SecretString::from("mock-merge-key");
-    config.merge_url = format!("{base}/chat").parse().unwrap();
+    config.gemini_key = SecretString::from("mock-gemini-key");
+    config.gemini_url = format!("{base}/chat").parse().unwrap();
     let state = configured(&state, config);
     let app = routes::router(state.clone());
-    let payload = json!({"model":"openai/gpt-6-luna","messages":[{"role":"user","content":"hello"}],"stream":true});
+    let payload = json!({"model":"gemini-3.5-flash-lite","messages":[{"role":"user","content":"hello"}],"stream":true});
     let (status, bytes) = body_request(
         &app,
         "/v1/chat/completions",
@@ -378,15 +378,21 @@ async fn merge_streaming_settles_usage_before_done_and_never_exposes_provider_ke
     let text = String::from_utf8(bytes).unwrap();
     assert!(text.contains("Hello"));
     assert!(text.contains("[DONE]"));
-    assert!(!text.contains("mock-merge-key"));
+    assert!(!text.contains("mock-gemini-key"));
     let bucket = usage_buckets::Entity::find()
         .filter(usage_buckets::Column::AccountId.eq(id))
         .one(&state.db)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(bucket.ai_spent, 4);
-    let premium = json!({"model":"anthropic/claude-sonnet-5-5","messages":[{"role":"user","content":"hello"}],"stream":true});
+    assert_eq!(bucket.ai_spent, 76);
+    let public_catalog = request(&app, "GET", "/v1/catalog", None, Value::Null).await;
+    assert_eq!(public_catalog.0, StatusCode::OK);
+    let catalog = public_catalog.1;
+    assert_eq!(catalog["models"][0]["id"], "gemini-3.5-flash-lite");
+    assert_eq!(catalog["models"][0]["multiplier"], 1);
+    assert_eq!(catalog["models"].as_array().unwrap().len(), 6);
+    let premium = json!({"model":"gemini-4-carbon","messages":[{"role":"user","content":"hello"}],"stream":true});
     assert_eq!(
         request(
             &app,
@@ -400,7 +406,314 @@ async fn merge_streaming_settles_usage_before_done_and_never_exposes_provider_ke
         StatusCode::PAYMENT_REQUIRED
     );
     task.abort();
+    let mut config = state.config.clone();
+    config.gemini_url = "http://127.0.0.1:1/chat".parse().unwrap();
+    let unavailable = configured(&state, config);
+    let app = routes::router(unavailable);
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            "/v1/chat/completions",
+            Some(&t.access_token),
+            payload
+        )
+        .await
+        .0,
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let pending = lennette_server::entities::reservations::Entity::find()
+        .filter(lennette_server::entities::reservations::Column::AccountId.eq(id))
+        .filter(lennette_server::entities::reservations::Column::Settled.eq(false))
+        .all(&state.db)
+        .await
+        .unwrap();
+    assert!(
+        pending.is_empty(),
+        "a failed Gemini request must release its reservation"
+    );
     cleanup(state, id).await;
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn managed_failover_switches_both_directions_and_continues_partial_answers() {
+    use axum::response::IntoResponse;
+    fn reply(
+        headers: HeaderMap,
+        body: Value,
+        primary: bool,
+        interrupted: bool,
+        gemini: bool,
+        failure_status: u16,
+    ) -> axum::response::Response {
+        assert_eq!(
+            headers["authorization"],
+            if gemini {
+                "Bearer test-gemini"
+            } else {
+                "Bearer test-deepseek"
+            }
+        );
+        assert_eq!(
+            body["model"],
+            if gemini {
+                "gemini-3.5-flash-lite"
+            } else {
+                "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+            }
+        );
+        if primary && !interrupted {
+            return (
+                StatusCode::from_u16(failure_status).unwrap(),
+                Json(json!({"error":{"message":"private upstream credit error"}})),
+            )
+                .into_response();
+        }
+        let content = if primary {
+            "Hello "
+        } else if interrupted {
+            "world"
+        } else {
+            "Hello world"
+        };
+        if !primary && interrupted {
+            let messages = body["messages"].as_array().unwrap();
+            assert_eq!(messages[messages.len() - 2]["role"], "assistant");
+            assert_eq!(messages[messages.len() - 2]["content"], "Hello ");
+            assert!(
+                messages.last().unwrap()["content"]
+                    .as_str()
+                    .unwrap()
+                    .contains("without repeating")
+            );
+        }
+        let usage = if primary {
+            json!({"prompt_tokens":20,"completion_tokens":2,"total_tokens":22})
+        } else {
+            json!({"prompt_tokens":1000,"completion_tokens":100,"total_tokens":1200,"prompt_tokens_details":{"cached_tokens":500}})
+        };
+        let delta = json!({"choices":[{"delta":{"content":content}}]});
+        let stream = format!(
+            "data: {delta}\n\ndata: {}\n\n{}",
+            json!({"choices":[],"usage":usage}),
+            if primary { "" } else { "data: [DONE]\n\n" }
+        );
+        ([(header::CONTENT_TYPE, "text/event-stream")], stream).into_response()
+    }
+    for (primary_gemini, interrupted, failure_status) in [
+        (true, false, 402),
+        (false, false, 429),
+        (true, false, 503),
+        (false, false, 401),
+        (true, true, 200),
+        (false, true, 200),
+    ] {
+        let (state, _, id, t) = fixture().await;
+        subscribe(&state, id).await;
+        let providers = Router::new()
+            .route(
+                "/gemini",
+                post(
+                    move |headers: HeaderMap, Json(body): Json<Value>| async move {
+                        reply(
+                            headers,
+                            body,
+                            primary_gemini,
+                            interrupted,
+                            true,
+                            failure_status,
+                        )
+                    },
+                ),
+            )
+            .route(
+                "/deepseek",
+                post(
+                    move |headers: HeaderMap, Json(body): Json<Value>| async move {
+                        reply(
+                            headers,
+                            body,
+                            !primary_gemini,
+                            interrupted,
+                            false,
+                            failure_status,
+                        )
+                    },
+                ),
+            );
+        let (base, task) = serve(providers).await;
+        let mut config = state.config.clone();
+        config.gemini_key = SecretString::from("test-gemini");
+        config.deepseek_key = SecretString::from("test-deepseek");
+        config.gemini_url = format!("{base}/gemini").parse().unwrap();
+        config.deepseek_url = format!("{base}/deepseek").parse().unwrap();
+        let state = configured(&state, config);
+        let app = routes::router(state.clone());
+        let model = if primary_gemini {
+            "gemini-3.5-flash-lite"
+        } else {
+            "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+        };
+        let (status,bytes)=body_request(&app,"/v1/chat/completions",&t.access_token,serde_json::to_vec(&json!({"model":model,"messages":[{"role":"user","content":"hello"}],"stream":true})).unwrap()).await;
+        assert_eq!(status, StatusCode::OK);
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("ai_provider_switch"));
+        assert!(!text.contains("private upstream credit error"));
+        assert!(!text.contains("test-gemini"));
+        assert!(!text.contains("test-deepseek"));
+        assert_eq!(text.matches("[DONE]").count(), 1);
+        let answer = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+            .filter_map(|event| {
+                event["choices"][0]["delta"]["content"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .collect::<String>();
+        assert_eq!(answer, "Hello world");
+        let spent = usage_buckets::Entity::find()
+            .filter(usage_buckets::Column::AccountId.eq(id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .ai_spent;
+        let expected = if primary_gemini { 328 } else { 665 }
+            + if interrupted {
+                if primary_gemini { 11 } else { 7 }
+            } else {
+                0
+            };
+        assert_eq!(spent, expected);
+        let unsettled = lennette_server::entities::reservations::Entity::find()
+            .filter(lennette_server::entities::reservations::Column::AccountId.eq(id))
+            .filter(lennette_server::entities::reservations::Column::Settled.eq(false))
+            .all(&state.db)
+            .await
+            .unwrap();
+        assert!(unsettled.is_empty());
+        task.abort();
+        cleanup(state, id).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires local Postgres and Redis"]
+async fn cancelled_continuations_settle_during_reserve_send_and_switch_yield() {
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+    for stage in ["reserve", "send", "switch"] {
+        let schema = format!("storage_test_cancel_{}", Uuid::new_v4().simple());
+        let (state, _, id, t) = fixture_in_schema(Some(schema)).await;
+        subscribe(&state, id).await;
+        let lock_id = (Uuid::new_v4().as_u128() % 100_000_000 + 1) as i64;
+        let gate = if stage == "reserve" {
+            state.db.execute_unprepared(&format!("CREATE FUNCTION pause_continuation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.amount=87 THEN PERFORM pg_advisory_xact_lock({lock_id}); END IF; RETURN NEW; END $$; CREATE TRIGGER pause_continuation BEFORE INSERT ON reservations FOR EACH ROW EXECUTE FUNCTION pause_continuation();")).await.unwrap();
+            let tx = state.db.begin().await.unwrap();
+            tx.execute_unprepared(&format!("SELECT pg_advisory_xact_lock({lock_id})"))
+                .await
+                .unwrap();
+            Some(tx)
+        } else {
+            None
+        };
+        let sending = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let switched = Arc::new(tokio::sync::Notify::new());
+        let (signal, unblock) = (sending.clone(), release.clone());
+        let providers=Router::new()
+            .route("/primary",post(||async {
+                ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"Hello \"}}]}\n\ndata: {\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,\"total_tokens\":22}}\n\n")
+            }))
+            .route("/backup",post(move || {let (signal,unblock)=(signal.clone(),unblock.clone());async move {
+                signal.notify_one();
+                if stage=="send" {unblock.notified().await;}
+                ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\ndata: [DONE]\n\n")
+            }}));
+        let (base, server) = serve(providers).await;
+        let mut config = state.config.clone();
+        config.gemini_key = SecretString::from("primary-key");
+        config.deepseek_key = SecretString::from("backup-key");
+        config.gemini_url = format!("{base}/primary").parse().unwrap();
+        config.deepseek_url = format!("{base}/backup").parse().unwrap();
+        let state = configured(&state, config);
+        let app = routes::router(state.clone());
+        let response=app.oneshot(Request::builder().method("POST").uri("/v1/chat/completions")
+            .header("authorization",format!("Bearer {}",t.access_token)).header("content-type","application/json")
+            .body(Body::from(json!({"model":"gemini-3.5-flash-lite","messages":[{"role":"user","content":"hello"}],"max_tokens":16,"relay_live":false}).to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let noticed = switched.clone();
+        let driver = tokio::spawn(async move {
+            let mut stream = response.into_body().into_data_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.unwrap();
+                if String::from_utf8_lossy(&chunk).contains("ai_provider_switch") {
+                    noticed.notify_one();
+                    std::future::pending::<()>().await;
+                }
+            }
+        });
+        tokio::time::timeout(StdDuration::from_secs(10),async {
+            if stage=="reserve" {
+                loop {
+                    let row=state.db.query_one_raw(sea_orm::Statement::from_string(sea_orm::DbBackend::Postgres,format!("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND objid={lock_id} AND NOT granted) AS waiting"))).await.unwrap().unwrap();
+                    if row.try_get::<bool>("","waiting").unwrap() {break;}
+                    tokio::time::sleep(StdDuration::from_millis(10)).await;
+                }
+            } else if stage=="send" {sending.notified().await;}
+            else {switched.notified().await;}
+        }).await.unwrap();
+        driver.abort();
+        assert!(driver.await.unwrap_err().is_cancelled());
+        if let Some(tx) = gate {
+            tx.rollback().await.unwrap();
+        }
+        release.notify_one();
+        let reservations = tokio::time::timeout(StdDuration::from_secs(10), async {
+            loop {
+                let rows = lennette_server::entities::reservations::Entity::find()
+                    .filter(lennette_server::entities::reservations::Column::AccountId.eq(id))
+                    .all(&state.db)
+                    .await
+                    .unwrap();
+                if rows.len() == 2 && rows.iter().all(|r| r.settled) {
+                    break rows;
+                }
+                tokio::time::sleep(StdDuration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let spent = usage_buckets::Entity::find()
+            .filter(usage_buckets::Column::AccountId.eq(id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .ai_spent;
+        assert_eq!(
+            spent, 98,
+            "{stage}: retain the accepted continuation's unknown usage charge"
+        );
+        for reservation in reservations {
+            billing::settle(&state, reservation.id, 0).await.unwrap();
+        }
+        assert_eq!(
+            usage_buckets::Entity::find()
+                .filter(usage_buckets::Column::AccountId.eq(id))
+                .one(&state.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .ai_spent,
+            spent,
+            "settlement must be idempotent"
+        );
+        server.abort();
+        cleanup(state, id).await;
+    }
 }
 
 fn signed_headers(id: &str, body: &[u8], secret: &[u8]) -> HeaderMap {

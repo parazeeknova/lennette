@@ -20,6 +20,7 @@ pub use attachments::cache_attachment;
 static CLIENT: RwLock<Option<Client>> = RwLock::new(None);
 static DATABASE: OnceLock<PathBuf> = OnceLock::new();
 static STATUS: Mutex<String> = Mutex::new(String::new());
+static PROVIDER_SWITCH: Mutex<Option<(String, String)>> = Mutex::new(None);
 static MEETING: Mutex<Option<(Uuid, f64)>> = Mutex::new(None);
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 static STARTED: OnceLock<()> = OnceLock::new();
@@ -27,10 +28,29 @@ pub fn active() -> Option<Client> {
     stored_client().filter(|client| !client.is_revoked())
 }
 fn stored_client() -> Option<Client> {
+    #[cfg(test)]
+    if let Some(client) = testing::client() {
+        return Some(client);
+    }
     CLIENT.read().ok()?.clone()
 }
 pub fn status() -> String {
     STATUS.lock().unwrap().clone()
+}
+pub(crate) fn provider_switched(model: String, name: String) {
+    #[cfg(test)]
+    if testing::client().is_some() {
+        testing::SESSION.with_borrow_mut(|s| s.as_mut().unwrap().2 = Some((model, name)));
+        return;
+    }
+    *PROVIDER_SWITCH.lock().unwrap() = Some((model, name));
+}
+pub(crate) fn take_provider_switch() -> Option<(String, String)> {
+    #[cfg(test)]
+    if testing::client().is_some() {
+        return testing::SESSION.with_borrow_mut(|s| s.as_mut().unwrap().2.take());
+    }
+    PROVIDER_SWITCH.lock().unwrap().take()
 }
 fn message(value: impl Into<String>) {
     *STATUS.lock().unwrap() = value.into()
@@ -318,20 +338,25 @@ pub fn meeting_context() -> Option<(Uuid, f64)> {
 }
 pub fn chat_config() -> Option<crate::ai::providers::ProviderConfig> {
     let client = active()?;
-    let model = DATABASE
-        .get()
+    let path = DATABASE.get().cloned();
+    #[cfg(test)]
+    let path = testing::SESSION
+        .with_borrow(|s| s.as_ref().map(|s| s.1.clone()))
+        .or(path);
+    let saved = path
+        .as_ref()
         .and_then(|path| Database::open(path).ok())
         .and_then(|db| {
             crate::db::settings::get(db.connection(), "chat_model")
                 .ok()
                 .flatten()
-        })
-        .unwrap_or_else(|| "openai/gpt-6-luna".into());
-    let mut config =
-        crate::ai::providers::ProviderConfig::new("merge-gateway", "managed-session", model);
+        });
+    let model = catalog::selected_model(&client, saved.as_deref());
+    let mut config = crate::ai::providers::ProviderConfig::new("gemini", "managed-session", model);
     config.base_url = client.url("/v1/chat/completions").ok()?.to_string();
     Some(config)
 }
+
 pub fn speech_config() -> Option<crate::ai::providers::ProviderConfig> {
     active()?;
     Some(crate::ai::providers::ProviderConfig::new(
@@ -363,4 +388,25 @@ pub fn resolve_conflicts(keep_local: bool) -> Result<(), String> {
     let db =
         Database::open(DATABASE.get().ok_or("database unavailable")?).map_err(|e| e.to_string())?;
     sync::resolve_conflicts(db.connection(), keep_local).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+    type TestSession = (Client, PathBuf, Option<(String, String)>);
+    thread_local! { pub(super) static SESSION: std::cell::RefCell<Option<TestSession>>=const {std::cell::RefCell::new(None)}; }
+    pub(super) fn client() -> Option<Client> {
+        SESSION.with_borrow(|s| s.as_ref().map(|s| s.0.clone()))
+    }
+    pub(crate) struct SessionGuard;
+    impl Drop for SessionGuard {
+        fn drop(&mut self) {
+            SESSION.with_borrow_mut(|s| *s = None);
+        }
+    }
+    /// Keep managed-request tests isolated from other threads and the real vault.
+    pub(crate) fn session(client: Client, path: PathBuf) -> SessionGuard {
+        SESSION.with_borrow_mut(|s| *s = Some((client, path, None)));
+        SessionGuard
+    }
 }

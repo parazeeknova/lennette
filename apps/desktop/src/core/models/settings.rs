@@ -313,6 +313,7 @@ pub struct Settings {
     pub response_length: ResponseLength,
     pub response_language: String,
     pub auto_scroll: bool,
+    pub collapse_live_transcript: bool,
     pub auto_recap: bool,
     pub smart_follow_ups: bool,
     pub smart_follow_ups_prompt: String,
@@ -352,6 +353,7 @@ impl Default for Settings {
             response_length: ResponseLength::Auto,
             response_language: "Auto".into(),
             auto_scroll: true,
+            collapse_live_transcript: true,
             auto_recap: false,
             smart_follow_ups: true,
             smart_follow_ups_prompt: FOLLOW_UP_PROMPT.to_owned(),
@@ -447,6 +449,10 @@ impl Settings {
                 .unwrap_or_default(),
             response_language: text("response_language", &defaults.response_language),
             auto_scroll: flag("auto_scroll", defaults.auto_scroll),
+            collapse_live_transcript: flag(
+                "collapse_live_transcript",
+                defaults.collapse_live_transcript,
+            ),
             auto_recap: flag("auto_recap", defaults.auto_recap),
             smart_follow_ups: flag(keys::SMART_FOLLOW_UPS, defaults.smart_follow_ups),
             smart_follow_ups_prompt: match get(keys::SMART_FOLLOW_UPS_PROMPT) {
@@ -529,6 +535,10 @@ impl Settings {
             ("response_length", self.response_length.label().into()),
             ("response_language", self.response_language.clone()),
             ("auto_scroll", self.auto_scroll.to_string()),
+            (
+                "collapse_live_transcript",
+                self.collapse_live_transcript.to_string(),
+            ),
             ("auto_recap", self.auto_recap.to_string()),
             (
                 "speech_language",
@@ -613,6 +623,7 @@ mod tests {
         assert!(settings.always_on_top);
         assert!(settings.show_watermark);
         assert_eq!(settings.overlay_size, "sm");
+        assert!(settings.collapse_live_transcript);
     }
 
     #[test]
@@ -645,6 +656,7 @@ mod tests {
             response_length: ResponseLength::Medium,
             response_language: "Hindi".into(),
             auto_scroll: false,
+            collapse_live_transcript: false,
             auto_recap: true,
             smart_follow_ups: false,
             smart_follow_ups_prompt: "custom".into(),

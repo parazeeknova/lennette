@@ -336,6 +336,7 @@ pub struct Overlay {
     configuration_version: Option<(i64, Option<std::time::SystemTime>, u64)>,
     managed_session: Option<lennette_sync_client::Client>,
     managed_model_labels: std::collections::HashMap<String, String>,
+    managed_model_weights: std::collections::HashMap<String, u32>,
     locked_models: Vec<crate::managed::catalog::Model>,
     mode: Mode,
     size: OverlaySize,
@@ -423,6 +424,8 @@ pub struct Overlay {
     /// Live transcript lines for the current Listen session.
     transcript: Vec<TranscriptEntry>,
     transcript_revision: usize,
+    /// Per-meeting visibility override; otherwise follow the saved preference.
+    transcript_collapsed: Option<bool>,
     /// Meeting row for the running session.
     meeting_id: Option<String>,
     /// Speech provider config, resolved when the session starts.
@@ -431,6 +434,7 @@ pub struct Overlay {
     chat: crate::features::chat_session::ChatSession,
     /// Why the last send failed.
     chat_error: Option<String>,
+    provider_notice: Option<String>,
     /// Utterances waiting to be transcribed.
     pending_audio: Vec<Vec<f32>>,
     live_connected: bool,
@@ -616,6 +620,7 @@ impl Overlay {
             configuration_version: None,
             managed_session: None,
             managed_model_labels: std::collections::HashMap::new(),
+            managed_model_weights: std::collections::HashMap::new(),
             locked_models: Vec::new(),
             mode: Mode::default(),
             size: OverlaySize::default(),
@@ -684,10 +689,12 @@ impl Overlay {
             runtime_settings,
             transcript: Vec::new(),
             transcript_revision: 0,
+            transcript_collapsed: None,
             meeting_id: None,
             speech: None,
             chat: crate::features::chat_session::ChatSession::new(),
             chat_error: None,
+            provider_notice: None,
             pending_audio: Vec::new(),
             live_connected: false,
             live_interim: Default::default(),
@@ -832,6 +839,7 @@ impl Overlay {
         self.runtime_settings =
             crate::core::settings::Settings::load_from_path(self.services.database_path.as_deref())
                 .unwrap_or_default();
+        self.transcript_collapsed = None;
 
         self.live_active = [false; 2];
         self.microphone_activity = None;
@@ -1346,6 +1354,7 @@ impl Overlay {
             self.capture_task.is_some() && !self.capture_sending && !self.capture_interval;
         self.interrupt_response();
         self.chat_error = None;
+        self.provider_notice = None;
         let settings = crate::features::settings::Settings::load_from_path(
             self.services.database_path.as_deref(),
         )
@@ -2125,7 +2134,9 @@ impl Overlay {
         self.message_list_state.reset(0);
         self.user_scrolled = false;
         // Transcript and live speech belong to the session that just ended.
+        self.provider_notice = None;
         self.transcript.clear();
+        self.transcript_collapsed = None;
         self.live_interim = Default::default();
         self.live_turns = Default::default();
         self.live_speaking = None;
@@ -3015,6 +3026,19 @@ impl Overlay {
 
     /// Sync settings (theme and transparency) in real-time.
     pub fn sync_settings(&mut self) -> bool {
+        let provider_changed = if let Some((model, name)) = crate::managed::take_provider_switch() {
+            if crate::managed::active().is_some() {
+                self.model = Some(model.clone());
+                self.provider_notice =
+                    Some(format!("Switched to {name} to keep the answer going."));
+                self.persist_managed_model(&model);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let session = crate::managed::active();
         let account_changed = match (&self.managed_session, &session) {
             (None, None) => false,
@@ -3029,12 +3053,14 @@ impl Overlay {
             self.catalog_choices.clear();
             self.catalog_status = None;
             self.managed_model_labels.clear();
+            self.managed_model_weights.clear();
+            self.provider_notice = None;
             self.locked_models.clear();
             self.model_provider = None;
             self.model = None;
         }
         if !account_changed && self.refreshed_at.elapsed() < std::time::Duration::from_secs(1) {
-            return false;
+            return provider_changed;
         }
         // SQLite data_version changes when another connection commits. An idle
         // overlay should not reopen/migrate the DB and decrypt both vault lists
@@ -3057,7 +3083,7 @@ impl Overlay {
                 );
                 if self.configuration_version.as_ref() == Some(&signature) {
                     self.refreshed_at = std::time::Instant::now();
-                    return false;
+                    return provider_changed;
                 }
                 self.configuration_version = Some(signature);
             }
@@ -3081,6 +3107,9 @@ impl Overlay {
             if !settings.smart_follow_ups {
                 self.cancel_follow_ups();
             }
+            if self.runtime_settings.collapse_live_transcript != settings.collapse_live_transcript {
+                self.transcript_collapsed = None;
+            }
             self.runtime_settings = settings.clone();
             if self.model_provider.as_deref() != Some(settings.chat_provider.as_str())
                 && let Some((id, model)) = self
@@ -3096,7 +3125,8 @@ impl Overlay {
             self.settings_theme = settings.theme;
             self.theme = Theme::from_settings(&settings);
         }
-        account_changed
+        provider_changed
+            || account_changed
             || before
                 != (
                     self.opacity,
@@ -3330,7 +3360,15 @@ impl Overlay {
             );
         }
 
-        None
+        self.provider_notice.as_ref().map(|notice| {
+            div()
+                .mx(px(space::MD))
+                .py(px(space::SM))
+                .text_size(scaled(11.0))
+                .text_color(theme.muted_foreground)
+                .child(notice.clone())
+                .into_any_element()
+        })
     }
 
     /// Whether the transcript shares the panel above the answers.
@@ -3354,7 +3392,12 @@ impl Overlay {
         }
     }
 
-    /// The Listen tab's body: the words you hear in the top half, answers below.
+    fn live_transcript_collapsed(&self) -> bool {
+        self.transcript_collapsed
+            .unwrap_or(self.runtime_settings.collapse_live_transcript)
+    }
+
+    /// The Listen tab's body: an optional transcript above the answers.
     fn listen_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.shows_transcript() {
             return self.message_list(cx).into_any_element();
@@ -3363,26 +3406,62 @@ impl Overlay {
         self.keep_transcript_at_bottom();
 
         let divider = self.surfaces().border();
-        let transcript: gpui::AnyElement = self.transcript_panel().into_any_element();
+        let collapsed = self.live_transcript_collapsed();
         let answers: gpui::AnyElement = self.message_list(cx).into_any_element();
 
-        div()
+        let mut body = div()
             .flex()
             .flex_col()
             .flex_1()
             .min_h(px(0.0))
             .px(px(space::SM))
-            .child(transcript)
             .child(
                 div()
-                    .h(px(1.0))
-                    .mx(px(space::MD))
-                    .mt(px(space::MD))
+                    .id("toggle-live-transcript")
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
                     .flex_shrink_0()
-                    .bg(divider),
-            )
-            .child(answers)
-            .into_any_element()
+                    .px(px(space::MD))
+                    .py(px(space::SM))
+                    .text_size(scaled(11.0))
+                    .text_color(self.theme.muted_foreground)
+                    .cursor_pointer()
+                    .child(icons::icon(
+                        &self.theme,
+                        if collapsed {
+                            Icon::ChevronRight
+                        } else {
+                            Icon::ChevronDown
+                        },
+                        12.0,
+                    ))
+                    .child(if collapsed {
+                        "Show transcript"
+                    } else {
+                        "Hide transcript"
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.transcript_collapsed = Some(!this.live_transcript_collapsed());
+                        if !this.live_transcript_collapsed() && this.runtime_settings.auto_scroll {
+                            this.transcript_scroll.scroll_to_bottom();
+                        }
+                        cx.notify();
+                    })),
+            );
+        if !collapsed {
+            body = body
+                .child(self.transcript_panel().into_any_element())
+                .child(
+                    div()
+                        .h(px(1.0))
+                        .mx(px(space::MD))
+                        .mt(px(space::MD))
+                        .flex_shrink_0()
+                        .bg(divider),
+                );
+        }
+        body.child(answers).into_any_element()
     }
 
     fn show_empty_wordmark(&self) -> bool {
@@ -4102,6 +4181,10 @@ impl Overlay {
         self.catalog_choices = models
             .iter()
             .map(|m| (provider.clone(), m.id.clone()))
+            .collect();
+        self.managed_model_weights = models
+            .iter()
+            .map(|m| (m.id.clone(), m.multiplier))
             .collect();
         self.managed_model_labels = models.into_iter().map(|m| (m.id, m.name)).collect();
         self.chat_choices = self.catalog_choices.clone();
@@ -6950,6 +7033,34 @@ mod tests {
     }
 
     #[test]
+    fn transcript_visibility_follows_preference_and_resets_for_a_new_chat() {
+        let (path, mut overlay) = fixture();
+        overlay.push_transcript(
+            "Can you explain the migration plan?".into(),
+            0.0,
+            1.0,
+            1,
+            None,
+        );
+        assert!(overlay.live_transcript_collapsed());
+        assert!(overlay.selected_system_prompt().contains("migration plan"));
+        overlay.transcript_collapsed = Some(false);
+        assert!(!overlay.live_transcript_collapsed());
+        assert_eq!(overlay.transcript.len(), 1);
+
+        overlay.runtime_settings.collapse_live_transcript = false;
+        overlay.transcript_collapsed = None;
+        assert!(!overlay.live_transcript_collapsed());
+        overlay.transcript_collapsed = Some(true);
+        assert!(overlay.live_transcript_collapsed());
+        overlay.new_chat();
+        assert!(!overlay.live_transcript_collapsed());
+
+        drop(overlay);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
     fn transcript_stacks_above_the_answers_only_in_listen_mode() {
         use crate::speech::transcription::{LiveEvent, TranscriptLine};
         let (path, mut overlay) = fixture();
@@ -7171,6 +7282,7 @@ mod tests {
             Some(crate::managed::catalog::PROVIDER)
         );
         assert_eq!(overlay.managed_model_labels["balanced"], "Balanced");
+        assert_eq!(overlay.managed_model_weights["balanced"], 2);
         overlay.select_model("balanced");
         overlay.apply_managed_models(models());
         assert_eq!(overlay.model.as_deref(), Some("balanced"));
@@ -7194,6 +7306,115 @@ mod tests {
         overlay.apply_managed_models(vec![models().remove(0)]);
         assert_eq!(overlay.model.as_deref(), Some("fast"));
         overlay.database = None;
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn managed_request_without_picker_validates_saved_model_and_applies_switch_notice() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (path, mut overlay) = fixture();
+        let db_path = path.join("managed-request.db");
+        let db = crate::db::Database::open(&db_path).unwrap();
+        crate::db::settings::set(db.connection(), "chat_model", "openai/gpt-6-luna").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let (headers, end, length) = loop {
+                    let mut chunk = [0u8; 4096];
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..end]).into_owned();
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length: ")
+                                    .and_then(|n| n.parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if bytes.len() >= end + 4 + length {
+                            break (headers, end + 4, length);
+                        }
+                    }
+                };
+                assert!(
+                    headers
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer substituted-access-token")
+                );
+                let (kind, body) = if headers.starts_with("GET /v1/catalog ") {
+                    (
+                        "application/json",
+                        r#"{"models":[{"id":"gemini-3.5-flash-lite","name":"Flash-Lite","multiplier":1,"plus_only":false},{"id":"deepseek-ai/DeepSeek-V4.1-Flash-1017","name":"DeepSeek","multiplier":1,"plus_only":false}]}"#,
+                    )
+                } else if headers.starts_with("GET /v1/billing/usage ") {
+                    ("application/json", r#"{"limits":{"id":"managed"}}"#)
+                } else {
+                    assert!(headers.starts_with("POST /v1/chat/completions "));
+                    let body: serde_json::Value =
+                        serde_json::from_slice(&bytes[end..end + length]).unwrap();
+                    assert_eq!(body["model"], "gemini-3.5-flash-lite");
+                    (
+                        "text/event-stream",
+                        "data: {\"lennette\":{\"type\":\"ai_provider_switch\",\"model\":\"deepseek-ai/DeepSeek-V4.1-Flash-1017\",\"name\":\"DeepSeek\"}}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n",
+                    )
+                };
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+            }
+        });
+        let client = lennette_sync_client::Client::restore(lennette_sync_client::SavedSession {
+            api_url: base,
+            expires_at: lennette_sync_client::now() + 3600,
+            tokens: lennette_sync_client::protocol::Tokens {
+                access_token: "substituted-access-token".into(),
+                refresh_token: "test-refresh".into(),
+                expires_in: 3600,
+                account_id: uuid::Uuid::new_v4(),
+            },
+        })
+        .unwrap();
+        let _session = crate::managed::testing::session(client.clone(), db_path);
+        overlay.database = Some(std::rc::Rc::new(db));
+        overlay.managed_session = Some(client);
+        overlay.model_provider = Some(crate::managed::catalog::PROVIDER.into());
+        let config = crate::managed::chat_config().unwrap();
+        assert_eq!(config.model, "gemini-3.5-flash-lite");
+        let (_cancel, rx) = tokio::sync::watch::channel(false);
+        let answer = crate::features::chat_engine::stream_chat_bounded(
+            &crate::features::chat_engine::http_client(),
+            &config,
+            &[crate::core::domain::Message::user("hello")],
+            &crate::features::chat_engine::TurnContext::default(),
+            std::sync::Arc::new(rx),
+            |_| std::future::ready(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer, "Hello");
+        assert!(!overlay.model_menu_open);
+        overlay.sync_settings();
+        assert_eq!(
+            overlay.model.as_deref(),
+            Some("deepseek-ai/DeepSeek-V4.1-Flash-1017")
+        );
+        assert!(
+            overlay
+                .provider_notice
+                .as_deref()
+                .unwrap()
+                .contains("DeepSeek")
+        );
+        assert_eq!(
+            crate::managed::chat_config().unwrap().model,
+            "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+        );
+        server.await.unwrap();
+        drop(overlay);
         std::fs::remove_dir_all(path).unwrap();
     }
 

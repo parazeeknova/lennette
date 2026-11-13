@@ -3,6 +3,37 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub const PROVIDER: &str = "lennette-managed";
+pub const DEFAULT_MODEL: &str = "gemini-3.5-flash-lite";
+const BOOTSTRAP_MODELS: &[&str] = &[
+    DEFAULT_MODEL,
+    "gemini-3.8-flash",
+    "gemini-4-hydrogen",
+    "gemini-4-argon",
+    "gemini-4-carbon",
+    "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+];
+static CATALOG: std::sync::Mutex<Option<(Client, Vec<Model>)>> = std::sync::Mutex::new(None);
+
+pub(crate) fn has_catalog(client: &Client) -> bool {
+    CATALOG
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|(owner, _)| owner.same_session(client))
+}
+pub(crate) fn selected_model(client: &Client, saved: Option<&str>) -> String {
+    let cache = CATALOG.lock().unwrap();
+    let valid = saved.filter(|id| {
+        match cache
+            .as_ref()
+            .filter(|(owner, _)| owner.same_session(client))
+        {
+            Some((_, models)) => models.iter().any(|m| m.id == *id),
+            None => BOOTSTRAP_MODELS.contains(id),
+        }
+    });
+    valid.unwrap_or(DEFAULT_MODEL).to_owned()
+}
 
 #[derive(Clone, Deserialize)]
 pub struct Model {
@@ -18,10 +49,12 @@ pub async fn models(client: &Client) -> Result<Vec<Model>, String> {
     let (catalog, usage) = tokio::try_join!(catalog, usage).map_err(|e| e.to_string())?;
     let catalog: Value = catalog.json().await.map_err(|e| e.to_string())?;
     let usage: Value = usage.json().await.map_err(|e| e.to_string())?;
-    eligible_models(
+    let models = eligible_models(
         catalog,
         usage["limits"]["id"].as_str() == Some("managed_plus"),
-    )
+    )?;
+    *CATALOG.lock().unwrap() = Some((client.clone(), models.clone()));
+    Ok(models)
 }
 
 /// Public previews never attach an account token or a provider API key.

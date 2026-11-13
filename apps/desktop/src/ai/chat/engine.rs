@@ -54,6 +54,31 @@ pub fn http_client() -> reqwest::Client {
 const MAX_SSE_LINE_BYTES: usize = 256 * 1024;
 const MAX_ANSWER_BYTES: usize = 2 * 1024 * 1024;
 
+fn provider_switch_notice(managed_session: bool, line: &[u8]) -> Option<(String, String)> {
+    if !managed_session {
+        return None;
+    }
+    let event = std::str::from_utf8(line)
+        .ok()
+        .and_then(|line| line.strip_prefix("data:"))
+        .and_then(|line| serde_json::from_str::<Value>(line.trim()).ok())?;
+    let notice = &event["lennette"];
+    if notice["type"] == "ai_provider_switch"
+        && let (Some(model), Some(name)) = (notice["model"].as_str(), notice["name"].as_str())
+        && model.len() <= 200
+        && name.len() <= 120
+    {
+        return Some((model.to_owned(), name.to_owned()));
+    }
+    None
+}
+
+fn provider_switch(managed_session: bool, line: &[u8]) {
+    if let Some((model, name)) = provider_switch_notice(managed_session, line) {
+        crate::managed::provider_switched(model, name);
+    }
+}
+
 /// Build the vendor request body.
 pub fn build_body(
     provider: &ChatProvider,
@@ -221,11 +246,18 @@ pub async fn stream_chat_bounded<F: std::future::Future<Output = ()>>(
     mut on_text: impl FnMut(String) -> F,
 ) -> Result<String, ChatError> {
     let started = std::time::Instant::now();
+    let managed_session = config.api_key == "managed-session";
     let managed_config;
-    let config = if config.api_key == "managed-session" {
+    let config = if managed_session {
         let account = crate::managed::active().ok_or(ChatError::NotConfigured)?;
         managed_config = {
             let mut config = config.clone();
+            if !crate::managed::catalog::has_catalog(&account) {
+                crate::managed::catalog::models(&account)
+                    .await
+                    .map_err(ChatError::Protocol)?;
+            }
+            config.model = crate::managed::catalog::selected_model(&account, Some(&config.model));
             config.api_key = account
                 .access_token()
                 .await
@@ -240,7 +272,7 @@ pub async fn stream_chat_bounded<F: std::future::Future<Output = ()>>(
         config
     };
     let mut first = true;
-    let result = stream_chat_inner(client, config, history, context, cancel, |text| {
+    let result = stream_chat_inner(client, config, history, context, cancel, managed_session, |text| {
         if first {
             first = false;
             tracing::debug!(provider = %config.id, elapsed_ms = started.elapsed().as_millis(), "provider first text");
@@ -265,6 +297,7 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     history: &[Message],
     context: &TurnContext,
     cancel: Arc<watch::Receiver<bool>>,
+    managed_session: bool,
     mut on_text: impl FnMut(String) -> F,
 ) -> Result<String, ChatError> {
     let definition = config.chat_definition().ok_or(ChatError::NotConfigured)?;
@@ -285,7 +318,7 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
     let mut cancellation = (*cancel).clone();
 
     let mut body = build_body(provider, config, history, context);
-    if config.base_url.contains("/v1/chat/completions") && crate::managed::active().is_some() {
+    if managed_session {
         body["max_tokens"] = json!(2048);
         body["relay_live"] = json!(context.conversation_id.is_some());
         if let Some(conversation) = context.conversation_id {
@@ -377,6 +410,7 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
             }
             let line = line.strip_suffix(b"\r").unwrap_or(line);
             consumed = newline + 1;
+            provider_switch(managed_session, line);
             match parse_sse_line(provider, line) {
                 Ok(Some(ChatEvent::Delta(text))) => {
                     if text.len() > MAX_ANSWER_BYTES.saturating_sub(answer.len()) {
@@ -403,6 +437,7 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
 
     // A final line without a newline still counts and must surface errors.
     if !buffer.is_empty() {
+        provider_switch(managed_session, &buffer);
         match parse_sse_line(provider, &buffer)? {
             Some(ChatEvent::Delta(text)) => {
                 if text.len() > MAX_ANSWER_BYTES.saturating_sub(answer.len()) {
@@ -454,6 +489,19 @@ fn completed_answer(answer: String) -> Result<String, ChatError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_managed_streams_can_announce_a_provider_switch() {
+        let line=br#"data: {"lennette":{"type":"ai_provider_switch","model":"deepseek-ai/DeepSeek-V4.1-Flash-1017","name":"DeepSeek V4.1 Flash"}}"#;
+        assert_eq!(
+            provider_switch_notice(true, line),
+            Some((
+                "deepseek-ai/DeepSeek-V4.1-Flash-1017".into(),
+                "DeepSeek V4.1 Flash".into()
+            ))
+        );
+        assert_eq!(provider_switch_notice(false, line), None);
+        assert_eq!(provider_switch_notice(true, b"data: [DONE]"), None);
+    }
     use crate::core::domain::Message;
 
     fn context(system: &str) -> TurnContext {

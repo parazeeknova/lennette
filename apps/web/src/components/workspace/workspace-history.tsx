@@ -180,6 +180,7 @@ export const LivePanel = ({
                     {answer.content || "Thinking…"}
                   </p>
                   <p className="mt-2 text-xs text-ink-soft">
+                    {answer.providerNotice ? `${answer.providerNotice} ` : ""}
                     {answerLabel(answer)}
                   </p>
                 </article>

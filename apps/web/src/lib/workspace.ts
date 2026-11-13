@@ -78,6 +78,7 @@ export interface LiveAnswer {
   done: boolean;
   complete: boolean;
   truncated: boolean;
+  providerNotice?: string;
   at: number;
 }
 export interface LiveMeeting {
@@ -255,6 +256,10 @@ const applyAnswer = (state: LiveState, frame: FrameContext): LiveState => {
     done: event["type"] === "ai_done" || event["done"] === true,
     complete: event["complete"] === true,
     truncated,
+    providerNotice:
+      event["type"] === "ai_provider_switch"
+        ? `Switched to ${text(event["name"]).slice(0, 120)} to continue this answer.`
+        : (prior?.providerNotice ?? ""),
     at: frame.at,
   };
   return {
@@ -288,6 +293,7 @@ export const applyLive = (state: LiveState, input: unknown): LiveState => {
       return applyTranscript(state, frame);
     }
     case "ai_start":
+    case "ai_provider_switch":
     case "ai_delta":
     case "ai_done":
     case "ai_snapshot": {

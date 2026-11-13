@@ -72,6 +72,11 @@ const INDEX: &[(Route, &str, &str)] = &[
         "scrolling latest response bottom",
     ),
     (
+        Route::Responses,
+        "Collapse live transcript by default",
+        "transcription meeting collapsed expanded hide show answers only",
+    ),
+    (
         Route::Profiles,
         "Context profiles",
         "personal about me interview meeting role background create edit",

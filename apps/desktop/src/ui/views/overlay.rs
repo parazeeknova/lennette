@@ -1294,7 +1294,7 @@ impl Overlay {
         if self.transcription_busy && id.is_some() {
             self.finishing_meeting_id = id.clone();
             self.finishing_meeting_offsets = (self.meeting_offset, self.meeting_speaker_offset);
-        } else {
+        } else if !self.transcription_busy {
             crate::managed::defer_meeting_sync(false);
         }
         id

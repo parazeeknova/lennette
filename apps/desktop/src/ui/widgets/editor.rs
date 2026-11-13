@@ -372,7 +372,7 @@ impl Render for Editor {
                     .max_h(crate::ui::theme::scaled(if compact {
                         line_height
                     } else {
-                        216.0
+                        self.min_height.max(240.0) - padding * 2.0
                     }))
                     .overflow_x_scroll()
                     .when(!compact, |s| s.overflow_y_scroll())

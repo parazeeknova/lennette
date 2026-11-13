@@ -98,16 +98,16 @@ pub fn init(path: Option<&Path>) {
                 let mut last_pull = std::time::Instant::now() - worker::RECOVERY_INTERVAL;
                 loop {
                     if let (Some(client), Some(path)) = (stored_client(), DATABASE.get()) {
+                        if client.is_revoked() {
+                            expire_session(&client);
+                            failures = 0;
+                            continue;
+                        }
                         if meeting_sync_deferred() {
                             message("Low latency · Saved locally · Sync after meeting");
                             runtime.block_on(async {
                                 tokio::time::sleep(Duration::from_millis(500)).await
                             });
-                            continue;
-                        }
-                        if client.is_revoked() {
-                            expire_session(&client);
-                            failures = 0;
                             continue;
                         }
                         let _lock = SYNC_LOCK.lock().unwrap();

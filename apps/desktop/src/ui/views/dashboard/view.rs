@@ -2555,6 +2555,7 @@ impl Render for DashboardView {
         ));
         let theme = self.theme;
         for editor in [
+            self.editor.as_ref(),
             self.settings_search.as_ref(),
             self.prompt_search.as_ref(),
             self.profile_search.as_ref(),
@@ -2628,7 +2629,14 @@ impl Render for DashboardView {
                         .border_1()
                         .border_color(theme.border)
                         .bg(if theme.is_glass() {
-                            Theme::with_alpha(Theme::DARK.background, 1.0)
+                            Theme::with_alpha(
+                                if theme.foreground.r < 0.5 {
+                                    Theme::LIGHT.background
+                                } else {
+                                    Theme::DARK.background
+                                },
+                                1.0,
+                            )
                         } else {
                             theme.popover()
                         })

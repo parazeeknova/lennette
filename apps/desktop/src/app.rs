@@ -215,22 +215,19 @@ pub fn run() {
             // The overlay opens first and can open the dashboard.
             let services_for_overlay = services.clone();
             let bounds = Bounds::centered(None, size(px(OVERLAY_WIDTH), px(OVERLAY_HEIGHT)), cx);
-            let bounds = crate::window_state::restore(
+            let placement = crate::window_state::restore(
                 services.database_path.as_deref(),
                 "overlay",
                 (OVERLAY_MIN_WIDTH, OVERLAY_MIN_HEIGHT),
                 bounds,
                 cx,
             );
+            let bounds = placement.bounds;
             let overlay_options = WindowOptions {
                 show: !cfg!(any(windows, target_os = "macos")),
                 app_id: Some(crate::identity::APP_ID.into()),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                display_id: cx
-                    .displays()
-                    .into_iter()
-                    .find(|display| display.bounds().contains(&bounds.center()))
-                    .map(|display| display.id()),
+                display_id: placement.display_id,
                 window_min_size: Some(size(px(OVERLAY_MIN_WIDTH), px(OVERLAY_MIN_HEIGHT))),
                 // GPUI's Windows renderer always uses alpha composition. Opaque
                 // here disables the separate native accent material, so rendered
@@ -345,8 +342,8 @@ pub fn run() {
                 });
                 let geometry_path = services_for_overlay.database_path.clone();
                 let overlay = cx.new(|cx| {
-                    cx.observe_window_bounds(window, move |_, window, _| {
-                        crate::window_state::save(geometry_path.as_deref(), "overlay", window);
+                    cx.observe_window_bounds(window, move |_, window, cx| {
+                        crate::window_state::save(geometry_path.as_deref(), "overlay", window, cx);
                     })
                     .detach();
                     Overlay::new(
@@ -424,22 +421,19 @@ pub fn open_dashboard_at(
         }
     }
     let bounds = Bounds::centered(None, size(px(DASHBOARD_WIDTH), px(DASHBOARD_HEIGHT)), cx);
-    let bounds = crate::window_state::restore(
+    let placement = crate::window_state::restore(
         services.database_path.as_deref(),
         "dashboard",
         (960.0, 540.0),
         bounds,
         cx,
     );
+    let bounds = placement.bounds;
     let options = WindowOptions {
         show: !cfg!(any(windows, target_os = "macos")),
         app_id: Some(crate::identity::APP_ID.into()),
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        display_id: cx
-            .displays()
-            .into_iter()
-            .find(|display| display.bounds().contains(&bounds.center()))
-            .map(|display| display.id()),
+        display_id: placement.display_id,
         window_min_size: Some(size(px(960.0), px(540.0))),
         window_background: if cfg!(windows) {
             gpui::WindowBackgroundAppearance::Opaque
@@ -472,8 +466,8 @@ pub fn open_dashboard_at(
         let title_config = preferred_chat_config(&services);
         cx.new(|cx| {
             let geometry_path = services.database_path.clone();
-            cx.observe_window_bounds(window, move |_, window, _| {
-                crate::window_state::save(geometry_path.as_deref(), "dashboard", window);
+            cx.observe_window_bounds(window, move |_, window, cx| {
+                crate::window_state::save(geometry_path.as_deref(), "dashboard", window, cx);
             })
             .detach();
             let mut view = DashboardView::with_titles(services.connect(), title_config);

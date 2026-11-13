@@ -898,7 +898,7 @@ async fn remote_device_revocation_notifies_sync_socket_immediately() {
             &app,
             "GET",
             "/v1/me",
-            Some(&desktop.access_token),
+            Some(rotated["access_token"].as_str().unwrap()),
             json!(null)
         )
         .await

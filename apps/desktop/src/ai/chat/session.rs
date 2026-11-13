@@ -141,7 +141,7 @@ impl ChatSession {
         self.conversation_id = Some(id.to_owned());
         Ok(records
             .into_iter()
-            .filter(|r| !r.content.trim().is_empty())
+            .filter(|r| !r.context_only && !r.content.trim().is_empty())
             .map(record_message)
             .collect())
     }
@@ -164,6 +164,17 @@ impl ChatSession {
         database: Option<&Database>,
         question: &str,
         previews: &[String],
+    ) -> Result<Vec<Message>, SendError> {
+        self.begin_turn(database, question, previews, false)
+    }
+
+    /// Automatic speech prompts belong to model context, not the visible chat.
+    pub fn begin_turn(
+        &mut self,
+        database: Option<&Database>,
+        question: &str,
+        previews: &[String],
+        context_only: bool,
     ) -> Result<Vec<Message>, SendError> {
         if self.streaming {
             return Err(SendError::AlreadyStreaming);
@@ -208,8 +219,8 @@ impl ChatSession {
             now,
         )
         .map_err(|error| SendError::Database(error.to_string()))?;
-        if !previews.is_empty() {
-            conversations::save_image_previews(connection, &question_id, previews)
+        if context_only || !previews.is_empty() {
+            conversations::save_turn_context(connection, &question_id, previews, context_only)
                 .map_err(|error| SendError::Database(error.to_string()))?;
         }
 
@@ -319,6 +330,40 @@ mod tests {
 
     fn database() -> Database {
         Database::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn automatic_speech_stays_in_model_history_but_out_of_restored_chat() {
+        let db = database();
+        let mut chat = ChatSession::new();
+        let spoken = "What would you like to ask before you start?";
+        let history = chat
+            .begin_turn(Some(&db), spoken, &["auto-preview".into()], true)
+            .unwrap();
+        assert_eq!(history.last().unwrap().content, spoken);
+        chat.push_delta(Some(&db), "A suggested reply");
+        chat.finish();
+        let id = chat.conversation_id().unwrap().to_owned();
+        let saved = conversations::messages(db.connection(), &id).unwrap();
+        assert!(saved[0].context_only);
+        assert!(!saved[1].context_only);
+
+        let mut restored = ChatSession::new();
+        let visible = restored.restore(&db, &id).unwrap();
+        assert_eq!(visible, vec![Message::assistant("A suggested reply")]);
+        // The same words explicitly typed by the user must remain a chat bubble.
+        let history = restored.begin(Some(&db), spoken).unwrap();
+        assert_eq!(history[0].content, spoken);
+        assert_eq!(history[1].content, "A suggested reply");
+        assert_eq!(history[2].content, spoken);
+        restored.finish();
+        assert_eq!(
+            restored.restore(&db, &id).unwrap(),
+            vec![
+                Message::assistant("A suggested reply"),
+                Message::user(spoken),
+            ]
+        );
     }
 
     #[test]

@@ -25,6 +25,8 @@ pub struct MessageRecord {
     pub role: String,
     pub content: String,
     pub timestamp: i64,
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 /// Create a conversation and return its id.
@@ -120,10 +122,27 @@ pub fn update_message(connection: &Connection, id: &str, content: &str) -> Resul
     Ok(())
 }
 
+/// Persist compact previews in the existing attachment column.
+pub fn save_image_previews(connection: &Connection, id: &str, images: &[String]) -> Result<()> {
+    let payload = serde_json::json!({"previews": images}).to_string();
+    connection.execute(
+        "UPDATE messages SET attached_files = ?2 WHERE id = ?1",
+        params![id, payload],
+    )?;
+    Ok(())
+}
+
+fn image_previews(payload: Option<String>) -> Vec<String> {
+    payload
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(&payload).ok())
+        .and_then(|payload| serde_json::from_value(payload.get("previews")?.clone()).ok())
+        .unwrap_or_default()
+}
+
 /// Messages in a conversation, oldest first.
 pub fn messages(connection: &Connection, conversation_id: &str) -> Result<Vec<MessageRecord>> {
     let mut statement = connection.prepare(
-        "SELECT id, role, content, timestamp FROM messages
+        "SELECT id, role, content, timestamp, attached_files FROM messages
          WHERE conversation_id = ?1
          ORDER BY timestamp ASC, rowid ASC",
     )?;
@@ -133,6 +152,7 @@ pub fn messages(connection: &Connection, conversation_id: &str) -> Result<Vec<Me
             role: row.get(1)?,
             content: row.get(2)?,
             timestamp: row.get(3)?,
+            images: image_previews(row.get(4)?),
         })
     })?;
     rows.collect::<std::result::Result<_, _>>()
@@ -151,7 +171,7 @@ pub fn recent_messages(
                     substr(content, 1, 10600) || char(10) ||
                     '[Earlier content shortened; the complete original is saved in this conversation.]' || char(10) ||
                     substr(content, -21300)
-                ELSE content END, timestamp
+                ELSE content END, timestamp, attached_files
          FROM messages WHERE conversation_id = ?1 AND content != ''
          ORDER BY timestamp DESC, rowid DESC LIMIT ?2",
     )?;
@@ -162,6 +182,7 @@ pub fn recent_messages(
                 role: row.get(1)?,
                 content: row.get(2)?,
                 timestamp: row.get(3)?,
+                images: image_previews(row.get(4)?),
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;

@@ -42,7 +42,7 @@ pub struct TurnContext {
     pub conversation_id: Option<uuid::Uuid>,
     /// System prompt steering the model.
     pub system: Option<String>,
-    /// Base64 PNG attachments, no data-URL prefix.
+    /// Base64 PNG/JPEG attachments, no data-URL prefix.
     pub images: Vec<String>,
 }
 
@@ -129,7 +129,7 @@ fn anthropic_body(
         let mut content = vec![json!({"type":"text", "text":message.content})];
         if images && index + 1 == history.len() && message.role == crate::core::domain::Role::User {
             content.extend(context.images.iter().map(|image| json!({
-                "type":"image", "source":{"type":"base64", "media_type":"image/png", "data":image}
+                "type":"image", "source":{"type":"base64", "media_type":super::images::mime(image), "data":image}
             })));
         }
         messages.push(json!({"role":role_name(message), "content":content}));
@@ -147,7 +147,7 @@ fn openai_message(message: &Message, images: &[String]) -> Value {
         json!({ "role": role_name(message), "content": message.content })
     } else {
         let mut content = vec![json!({"type": "text", "text": message.content})];
-        content.extend(images.iter().map(|image| json!({"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{image}")}})));
+        content.extend(images.iter().map(|image| json!({"type": "image_url", "image_url": {"url": format!("data:{};base64,{image}", super::images::mime(image))}})));
         json!({"role": role_name(message), "content": content})
     }
 }
@@ -247,6 +247,23 @@ pub async fn stream_chat_bounded<F: std::future::Future<Output = ()>>(
 ) -> Result<String, ChatError> {
     let started = std::time::Instant::now();
     let managed_session = config.api_key == "managed-session";
+    let normalized_context;
+    let context = if managed_session && !context.images.is_empty() {
+        let images = context.images.clone();
+        let images = tokio::task::spawn_blocking(move || super::images::prepare(images))
+            .await
+            .map_err(|_| {
+                ChatError::Protocol("Image preparation failed. Try attaching it again.".into())
+            })?
+            .map_err(ChatError::Protocol)?;
+        normalized_context = TurnContext {
+            images,
+            ..context.clone()
+        };
+        &normalized_context
+    } else {
+        context
+    };
     let managed_account = if managed_session {
         Some(crate::managed::active().ok_or(ChatError::NotConfigured)?)
     } else {
@@ -562,7 +579,10 @@ mod tests {
             provider,
             &config,
             &[
-                Message::user("old"),
+                Message {
+                    images: vec!["saved-preview".into()],
+                    ..Message::user("old")
+                },
                 Message::assistant("reply"),
                 Message::user("look"),
             ],
@@ -575,6 +595,31 @@ mod tests {
         assert!(body["messages"][0]["content"].is_string());
         assert!(body["messages"][1]["content"].is_string());
         assert!(body["messages"][2]["content"].is_array());
+    }
+
+    #[test]
+    fn jpeg_screenshots_have_the_correct_provider_media_type() {
+        let context = TurnContext {
+            images: vec!["/9j/screenshot".into()],
+            ..Default::default()
+        };
+        for wire in [ChatWire::OpenAi, ChatWire::Anthropic] {
+            let provider = ChatProvider {
+                wire,
+                ..*ChatProvider::by_id("gemini").unwrap()
+            };
+            let config = ProviderConfig::new("gemini", "k", "m");
+            let body = build_body(&provider, &config, &[Message::user("look")], &context);
+            let content = &body["messages"][0]["content"][1];
+            if wire == ChatWire::Anthropic {
+                assert_eq!(content["source"]["media_type"], "image/jpeg");
+            } else {
+                assert_eq!(
+                    content["image_url"]["url"],
+                    "data:image/jpeg;base64,/9j/screenshot"
+                );
+            }
+        }
     }
 
     #[test]

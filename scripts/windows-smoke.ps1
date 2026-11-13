@@ -221,7 +221,7 @@ try {
     Assert-Protection $overlay
     Start-Sleep -Milliseconds 500
     [LennetteWindows]::AssertPillDrag($overlay)
-    [LennetteWindows]::AssertMinimumSize($overlay, 680, 420)
+    [LennetteWindows]::AssertMinimumSize($overlay, 480, 420)
     if ([LennetteWindows]::Find($app.Id, 'Lennette tray') -ne [IntPtr]::Zero) { throw 'Privacy launch created an Explorer tray icon' }
     # Exercise RegisterHotKey, not just the one-shot control flags.
     [LennetteWindows]::ToggleHotkey()

@@ -2,6 +2,7 @@
 
 pub mod conversation;
 pub mod engine;
+pub(crate) mod images;
 pub mod session;
 
 pub use conversation::*;

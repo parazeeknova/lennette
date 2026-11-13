@@ -156,6 +156,15 @@ impl ChatSession {
         database: Option<&Database>,
         question: &str,
     ) -> Result<Vec<Message>, SendError> {
+        self.begin_with_images(database, question, &[])
+    }
+
+    pub fn begin_with_images(
+        &mut self,
+        database: Option<&Database>,
+        question: &str,
+        previews: &[String],
+    ) -> Result<Vec<Message>, SendError> {
         if self.streaming {
             return Err(SendError::AlreadyStreaming);
         }
@@ -191,8 +200,18 @@ impl ChatSession {
                 .collect();
         history.push(Message::user(question.trim()));
 
-        conversations::append_message(connection, &conversation_id, "user", question.trim(), now)
-            .map_err(|error| SendError::Database(error.to_string()))?;
+        let question_id = conversations::append_message(
+            connection,
+            &conversation_id,
+            "user",
+            question.trim(),
+            now,
+        )
+        .map_err(|error| SendError::Database(error.to_string()))?;
+        if !previews.is_empty() {
+            conversations::save_image_previews(connection, &question_id, previews)
+                .map_err(|error| SendError::Database(error.to_string()))?;
+        }
 
         let answer_id =
             conversations::append_message(connection, &conversation_id, "assistant", "", now)
@@ -279,7 +298,7 @@ fn record_message(record: conversations::MessageRecord) -> Message {
             _ => crate::core::domain::Role::User,
         },
         content: record.content,
-        images: Vec::new(),
+        images: record.images,
     }
 }
 
@@ -300,6 +319,27 @@ mod tests {
 
     fn database() -> Database {
         Database::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn sent_screenshot_previews_survive_restore_and_followups() {
+        let db = database();
+        let mut chat = ChatSession::new();
+        let previews = vec!["saved-png-preview".to_owned()];
+        chat.begin_with_images(Some(&db), "Explain this screenshot", &previews)
+            .unwrap();
+        chat.push_delta(Some(&db), "Here is the explanation");
+        chat.finish();
+        let id = chat.conversation_id().unwrap().to_owned();
+        let saved = conversations::messages(db.connection(), &id).unwrap();
+        assert_eq!(saved[0].images, previews);
+        assert!(saved[1].images.is_empty());
+        let mut restored = ChatSession::new();
+        let messages = restored.restore(&db, &id).unwrap();
+        assert_eq!(messages[0].images, previews);
+        let followup = restored.begin(Some(&db), "And this part?").unwrap();
+        assert_eq!(followup[0].images, previews);
+        assert!(followup.last().unwrap().images.is_empty());
     }
 
     #[test]

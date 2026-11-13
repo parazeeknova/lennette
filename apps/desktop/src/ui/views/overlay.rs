@@ -192,6 +192,7 @@ fn is_question(text: &str) -> bool {
 #[derive(Clone)]
 enum ChatRow {
     User(String),
+    Image(std::sync::Arc<gpui::Image>),
     Markdown {
         document: std::sync::Arc<Vec<crate::ui::markdown::Block>>,
         block: usize,
@@ -208,6 +209,7 @@ impl PartialEq for ChatRow {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::User(a), Self::User(b)) => a == b,
+            (Self::Image(a), Self::Image(b)) => std::sync::Arc::ptr_eq(a, b),
             (
                 Self::Markdown {
                     document: a,
@@ -480,6 +482,7 @@ pub struct Overlay {
     message_rows: std::rc::Rc<Vec<ChatRow>>,
     message_documents: Vec<Option<std::sync::Arc<Vec<crate::ui::markdown::Block>>>>,
     message_signature: (usize, usize),
+    message_images: std::collections::HashMap<String, std::sync::Arc<gpui::Image>>,
     message_document_generation: usize,
     message_list_state: gpui::ListState,
     /// Scroll position of the live transcript, kept pinned to the newest words.
@@ -734,6 +737,7 @@ impl Overlay {
             message_rows: std::rc::Rc::new(Vec::new()),
             message_documents: Vec::new(),
             message_signature: (0, 0),
+            message_images: std::collections::HashMap::new(),
             message_document_generation: 0,
             message_list_state: gpui::ListState::new(0, gpui::ListAlignment::Bottom, px(240.0)),
             transcript_scroll: gpui::ScrollHandle::new(),
@@ -1432,7 +1436,7 @@ impl Overlay {
             .database_path
             .as_deref()
             .and_then(|path| crate::features::db::Database::open(path).ok());
-        if self.context_sources.iter().any(|item| item.image.is_some())
+        if (image.is_some() || self.context_sources.iter().any(|item| item.image.is_some()))
             && !config
                 .chat_definition()
                 .is_some_and(|provider| provider.supports_images)
@@ -1449,7 +1453,23 @@ impl Overlay {
                 self.runtime_settings.response_language.clone(),
             ));
         }
-        let history = match self.chat.begin(database.as_ref(), &question) {
+        let mut images = image.map(|image| vec![image.base64]).unwrap_or_default();
+        images.extend(
+            self.context_sources
+                .iter()
+                .filter_map(|item| item.image.clone()),
+        );
+        let previews = match crate::ai::chat::images::previews(&images) {
+            Ok(previews) => previews,
+            Err(error) => {
+                self.chat_error = Some(error);
+                return;
+            }
+        };
+        let history = match self
+            .chat
+            .begin_with_images(database.as_ref(), &question, &previews)
+        {
             Ok(history) => history,
             Err(error) => {
                 self.chat_error = Some(error.message());
@@ -1459,14 +1479,9 @@ impl Overlay {
         self.save_resume_context(database.as_ref());
 
         // Show exactly the question sent, including ambient and shortcut turns.
-        self.conversation
-            .push(crate::features::domain::Message::user(question));
-        let mut images = image.map(|image| vec![image.base64]).unwrap_or_default();
-        images.extend(
-            self.context_sources
-                .iter()
-                .filter_map(|item| item.image.clone()),
-        );
+        let mut message = crate::features::domain::Message::user(question);
+        message.images = previews;
+        self.conversation.push(message);
 
         let context = crate::features::chat_engine::TurnContext {
             conversation_id: self.chat.conversation_id().and_then(|id| id.parse().ok()),
@@ -3731,6 +3746,17 @@ impl Overlay {
         }
         let signature = (self.conversation.revision(), self.streaming_text.len());
         if signature != self.message_signature {
+            self.message_images.retain(|encoded, image| {
+                let keep = self
+                    .conversation
+                    .messages()
+                    .iter()
+                    .any(|message| message.images.contains(encoded));
+                if !keep {
+                    self.retired_previews.push(image.clone());
+                }
+                keep
+            });
             if self.message_document_generation != self.conversation.eviction_generation() {
                 self.message_documents.clear();
                 self.message_document_generation = self.conversation.eviction_generation();
@@ -3742,6 +3768,24 @@ impl Overlay {
                 }
                 if message.role == Role::User {
                     rows.push(ChatRow::User(message.content.clone()));
+                    for encoded in &message.images {
+                        use base64::Engine;
+                        if !self.message_images.contains_key(encoded)
+                            && let Ok(bytes) =
+                                base64::engine::general_purpose::STANDARD.decode(encoded)
+                        {
+                            self.message_images.insert(
+                                encoded.clone(),
+                                std::sync::Arc::new(gpui::Image::from_bytes(
+                                    gpui::ImageFormat::Png,
+                                    bytes,
+                                )),
+                            );
+                        }
+                        if let Some(image) = self.message_images.get(encoded) {
+                            rows.push(ChatRow::Image(image.clone()));
+                        }
+                    }
                 } else {
                     let document = self.message_documents[index]
                         .get_or_insert_with(|| crate::ui::markdown::cached_parse(&message.content))
@@ -3816,6 +3860,18 @@ impl Overlay {
                                     }
                                 }
                             }),
+                    )
+                    .into_any_element(),
+                ChatRow::Image(image) => div()
+                    .flex()
+                    .w_full()
+                    .justify_end()
+                    .child(
+                        gpui::img(image.clone())
+                            .max_w(px(224.0))
+                            .max_h(px(224.0))
+                            .object_fit(gpui::ObjectFit::Contain)
+                            .rounded(px(radius::LG)),
                     )
                     .into_any_element(),
                 ChatRow::Markdown { document, block } => {
@@ -7388,6 +7444,22 @@ mod tests {
                     let body: serde_json::Value =
                         serde_json::from_slice(&bytes[end..end + length]).unwrap();
                     assert_eq!(body["model"], "gemini-3.5-flash-lite");
+                    use base64::Engine;
+                    let image = body["messages"][0]["content"][1]["image_url"]["url"]
+                        .as_str()
+                        .unwrap()
+                        .strip_prefix("data:image/png;base64,")
+                        .unwrap();
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(image)
+                        .unwrap();
+                    assert!(bytes.len() <= lennette_protocol::MAX_CHAT_IMAGE_BYTES);
+                    assert_eq!(
+                        image::guess_format(&bytes).unwrap(),
+                        image::ImageFormat::Png
+                    );
+                    let image = image::load_from_memory(&bytes).unwrap();
+                    assert!(image.width() <= lennette_protocol::MAX_CHAT_IMAGE_EDGE);
                     (
                         "text/event-stream",
                         "data: {\"lennette\":{\"type\":\"ai_provider_switch\",\"model\":\"deepseek-ai/DeepSeek-V4.1-Flash-1017\",\"name\":\"DeepSeek\"}}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n",
@@ -7418,7 +7490,17 @@ mod tests {
             &crate::features::chat_engine::http_client(),
             &config,
             &[crate::core::domain::Message::user("hello")],
-            &crate::features::chat_engine::TurnContext::default(),
+            &crate::features::chat_engine::TurnContext {
+                images: vec![
+                    crate::platform::display::capture::encode(
+                        &image::RgbaImage::from_pixel(1920, 1080, image::Rgba([40, 60, 80, 255])),
+                        false,
+                    )
+                    .unwrap()
+                    .base64,
+                ],
+                ..Default::default()
+            },
             std::sync::Arc::new(rx),
             |_| std::future::ready(()),
         )

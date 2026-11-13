@@ -21,6 +21,8 @@ pub fn sync_record_id(account: Uuid, table: &str, local_id: &str) -> Uuid {
 pub const API_VERSION: u16 = 1;
 pub const MAX_RECORD_BYTES: usize = 256 * 1024;
 pub const MAX_BATCH: usize = 100;
+pub const MAX_CHAT_IMAGE_EDGE: u32 = 1024;
+pub const MAX_CHAT_IMAGE_BYTES: usize = 512 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

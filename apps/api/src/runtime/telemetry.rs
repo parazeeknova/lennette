@@ -1,5 +1,17 @@
 use opentelemetry::trace::TracerProvider;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    Layer,
+    filter::{FilterExt, filter_fn},
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+};
+
+// OTLP intentionally returns a generic error to processors. Preserve only its
+// transport diagnostic in the console even with the normal info filter. Broad OTLP DEBUG
+// logging can include collector response bodies, so do not enable it globally.
+fn transport_diagnostic(metadata: &tracing::Metadata<'_>) -> bool {
+    metadata.target() == "opentelemetry-otlp" && metadata.name() == "HttpClient.NetworkError"
+}
 
 pub struct Telemetry {
     traces: opentelemetry_sdk::trace::SdkTracerProvider,
@@ -72,15 +84,22 @@ pub fn init() -> anyhow::Result<Option<Telemetry>> {
     } else {
         None
     };
-    let otel = provider
-        .as_ref()
-        .map(|p| tracing_opentelemetry::layer().with_tracer(p.traces.tracer("lennette-api")));
-    let logs = provider
-        .as_ref()
-        .map(|p| opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&p.logs));
+    let otel = provider.as_ref().map(|p| {
+        tracing_opentelemetry::layer()
+            .with_tracer(p.traces.tracer("lennette-api"))
+            .with_filter(filter.clone())
+    });
+    let logs = provider.as_ref().map(|p| {
+        opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&p.logs)
+            .with_filter(filter.clone())
+    });
+    let console_filter = filter.or(filter_fn(transport_diagnostic));
     tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer().json())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_filter(console_filter),
+        )
         .with(otel)
         .with(logs)
         .try_init()?;
@@ -136,4 +155,47 @@ fn http_metrics() -> &'static (
                 .build(),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn console_captures_transport_failures_without_enabling_other_debug_events() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = output.clone();
+        let filter = tracing_subscriber::EnvFilter::new("info").or(filter_fn(transport_diagnostic));
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_writer(move || Capture(writer.clone()))
+                .with_filter(filter),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::event!(name: "HttpClient.NetworkError", target: "opentelemetry-otlp",
+                tracing::Level::DEBUG, error = "request timed out");
+            tracing::event!(name: "HttpClient.Response", target: "opentelemetry-otlp",
+                tracing::Level::DEBUG, body = "private collector response");
+            tracing::debug!("unrelated debug event");
+            tracing::info!("API listening");
+        });
+        let output = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        assert!(output.contains("request timed out"));
+        assert!(output.contains("API listening"));
+        assert!(!output.contains("private collector response"));
+        assert!(!output.contains("unrelated debug event"));
+    }
 }

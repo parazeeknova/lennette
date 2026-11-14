@@ -12,23 +12,45 @@ const BOOTSTRAP_MODELS: &[&str] = &[
     "gemini-4-carbon",
     "deepseek-ai/DeepSeek-V4.1-Flash-1017",
 ];
-static CATALOG: std::sync::Mutex<Option<(Client, Vec<Model>)>> = std::sync::Mutex::new(None);
+// Plan eligibility changes more often than provider model IDs. Keep this short
+// and session-scoped; explicit refresh always rechecks the current entitlement.
+const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+struct CachedCatalog {
+    owner: Client,
+    models: Vec<Model>,
+    fetched_at: std::time::Instant,
+}
+impl CachedCatalog {
+    fn valid_for(&self, client: &Client) -> bool {
+        self.owner.same_session(client) && self.fetched_at.elapsed() < CACHE_TTL
+    }
+}
+static CATALOG: std::sync::Mutex<Option<CachedCatalog>> = std::sync::Mutex::new(None);
+
+pub(crate) fn cached_models(client: &Client) -> Option<Vec<Model>> {
+    CATALOG
+        .lock()
+        .unwrap()
+        .as_ref()
+        .filter(|cache| cache.valid_for(client))
+        .map(|cache| cache.models.clone())
+}
 
 pub(crate) fn has_catalog(client: &Client) -> bool {
     CATALOG
         .lock()
         .unwrap()
         .as_ref()
-        .is_some_and(|(owner, _)| owner.same_session(client))
+        .is_some_and(|cache| cache.valid_for(client))
 }
 pub(crate) fn selected_model(client: &Client, saved: Option<&str>) -> String {
     let cache = CATALOG.lock().unwrap();
     let valid = saved.filter(|id| {
         match cache
             .as_ref()
-            .filter(|(owner, _)| owner.same_session(client))
+            .filter(|cache| cache.owner.same_session(client))
         {
-            Some((_, models)) => models.iter().any(|m| m.id == *id),
+            Some(cache) => cache.models.iter().any(|m| m.id == *id),
             None => BOOTSTRAP_MODELS.contains(id),
         }
     });
@@ -44,6 +66,13 @@ pub struct Model {
 }
 
 pub async fn models(client: &Client) -> Result<Vec<Model>, String> {
+    if let Some(models) = cached_models(client) {
+        return Ok(models);
+    }
+    refresh_models(client).await
+}
+
+pub async fn refresh_models(client: &Client) -> Result<Vec<Model>, String> {
     let catalog = client.request(reqwest::Method::GET, "/v1/catalog", &());
     let usage = client.request(reqwest::Method::GET, "/v1/billing/usage", &());
     let (catalog, usage) = tokio::try_join!(catalog, usage).map_err(|e| e.to_string())?;
@@ -53,7 +82,11 @@ pub async fn models(client: &Client) -> Result<Vec<Model>, String> {
         catalog,
         usage["limits"]["id"].as_str() == Some("managed_plus"),
     )?;
-    *CATALOG.lock().unwrap() = Some((client.clone(), models.clone()));
+    *CATALOG.lock().unwrap() = Some(CachedCatalog {
+        owner: client.clone(),
+        models: models.clone(),
+        fetched_at: std::time::Instant::now(),
+    });
     Ok(models)
 }
 
@@ -137,7 +170,7 @@ mod tests {
         let base = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move {
             let mut paths = Vec::new();
-            for _ in 0..2 {
+            for _ in 0..4 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut bytes = Vec::new();
                 while !bytes.windows(4).any(|v| v == b"\r\n\r\n") {
@@ -160,7 +193,7 @@ mod tests {
                     ]})
                 } else {
                     assert_eq!(path, "/v1/billing/usage");
-                    serde_json::json!({"limits":{"id":"managed_plus"}})
+                    serde_json::json!({"limits":{"id": if paths.len() < 2 { "managed_plus" } else { "managed" }}})
                 }
                 .to_string();
                 paths.push(path);
@@ -185,13 +218,37 @@ mod tests {
             },
         })
         .unwrap();
-        let models = tokio::time::timeout(std::time::Duration::from_secs(3), models(&client))
+        let initial = tokio::time::timeout(std::time::Duration::from_secs(3), models(&client))
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[1].id, "advanced");
-        assert_eq!(server.await.unwrap(), ["/v1/billing/usage", "/v1/catalog"]);
+        assert_eq!(initial.len(), 2);
+        assert_eq!(initial[1].id, "advanced");
+        // Reopening does not consume the next network responses. Refresh must
+        // recheck plan eligibility and replace the cached Plus-only choices.
+        assert_eq!(models(&client).await.unwrap().len(), 2);
+        assert_eq!(refresh_models(&client).await.unwrap().len(), 1);
+        assert_eq!(models(&client).await.unwrap().len(), 1);
+        assert_eq!(
+            server.await.unwrap(),
+            [
+                "/v1/billing/usage",
+                "/v1/billing/usage",
+                "/v1/catalog",
+                "/v1/catalog"
+            ]
+        );
+
+        let another_session = Client::restore(client.saved().await).unwrap();
+        let mut cache = CachedCatalog {
+            owner: client.clone(),
+            models: initial,
+            fetched_at: std::time::Instant::now(),
+        };
+        assert!(cache.valid_for(&client));
+        assert!(!cache.valid_for(&another_session));
+        cache.fetched_at -= CACHE_TTL;
+        assert!(!cache.valid_for(&client));
     }
 
     #[test]

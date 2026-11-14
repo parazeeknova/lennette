@@ -1,6 +1,6 @@
 {
   "name": "@lennette/desktop",
-  "version": "0.18.26",
+  "version": "0.18.27",
   "private": true,
   "scripts": {
     "dev": "cross-env NODE_ENV=development bun --no-env-file ../../scripts/dev-env.ts desktop cargo run -p lennette",

@@ -27,6 +27,9 @@ use tokio_tungstenite::tungstenite::{Message as UpstreamMessage, client::IntoCli
 use tracing::Instrument;
 use uuid::Uuid;
 
+// Full reusable profiles plus recent meeting speech, history and images.
+const MAX_CHAT_CONTEXT_BYTES: i64 = 768_000;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChatMessage {
@@ -102,7 +105,7 @@ fn validate_messages(messages: &[ChatMessage]) -> Result<i64> {
             _ => return Err(ApiError::BadRequest("invalid message content".into())),
         }
     }
-    if budget > 96000 {
+    if budget > MAX_CHAT_CONTEXT_BYTES {
         return Err(ApiError::BadRequest(
             "context exceeds managed request limit".into(),
         ));
@@ -469,7 +472,7 @@ mod tests {
         assert!(
             validate_messages(&[ChatMessage {
                 role: "user".into(),
-                content: json!("x".repeat(96000))
+                content: json!("x".repeat(MAX_CHAT_CONTEXT_BYTES as usize))
             }])
             .is_err()
         );
@@ -480,5 +483,24 @@ mod tests {
             }])
             .is_ok()
         );
+    }
+
+    #[test]
+    fn proxy_accepts_full_unicode_profiles_with_recent_speech_and_history() {
+        let profile = serde_json::json!({
+            "about_me": "🦀".repeat(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS),
+            "meeting_brief": "🦀".repeat(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS),
+        });
+        let messages = [
+            ChatMessage {
+                role: "system".into(),
+                content: json!(format!("{profile}\n{}", "é".repeat(40_000))),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: json!("Recent history".repeat(3_000)),
+            },
+        ];
+        assert!(validate_messages(&messages).is_ok());
     }
 }

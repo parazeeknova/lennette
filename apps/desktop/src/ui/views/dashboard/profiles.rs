@@ -61,15 +61,18 @@ impl DashboardView {
             }),
             personal: cx.new(|cx| {
                 let mut editor = Editor::new(&profile.personal_context, self.theme, cx);
-                editor.min_height = 300.0;
-                editor.placeholder = "Your role, experience, strengths and useful background...";
+                editor.min_height = 360.0;
+                editor.max_chars = Some(store::MAX_CONTEXT_CHARS);
+                editor.placeholder =
+                    "Paste your background, experience, projects and relevant examples…";
                 editor
             }),
             meeting: cx.new(|cx| {
                 let mut editor = Editor::new(&profile.meeting_context, self.theme, cx);
-                editor.min_height = 300.0;
+                editor.min_height = 360.0;
+                editor.max_chars = Some(store::MAX_CONTEXT_CHARS);
                 editor.placeholder =
-                    "Who you are meeting, the topic, goals and details to remember...";
+                    "Add the agenda, participants, goals, facts, constraints and desired outcome…";
                 editor
             }),
         });
@@ -157,21 +160,23 @@ impl DashboardView {
             body = body.child(crate::ui::controls::warning(&theme, error));
         }
         if let Some(draft) = &self.profile_edit {
-            let mut contexts = div().flex().w_full().min_w(px(0.0)).gap(px(16.0));
-            if available < 820.0 {
-                contexts = contexts.flex_col();
-            }
+            let mut contexts = div()
+                .flex()
+                .flex_col()
+                .w_full()
+                .min_w(px(0.0))
+                .gap(px(20.0));
             for (icon, title, subtitle, editor) in [
                 (
                     Icon::UserRound,
-                    "About you",
-                    "Background that helps the AI understand your perspective.",
+                    "01 · Your background",
+                    "Your role, experience, projects and examples. Reuse this profile across meetings.",
                     &draft.personal,
                 ),
                 (
                     Icon::MessagesSquare,
-                    "Meeting context",
-                    "People, objectives and details for this conversation.",
+                    "02 · Meeting brief & direction",
+                    "Who is attending, what matters, where you want the conversation to go and what success looks like.",
                     &draft.meeting,
                 ),
             ] {
@@ -179,7 +184,7 @@ impl DashboardView {
                     div()
                         .flex()
                         .flex_col()
-                        .flex_1()
+                        .w_full()
                         .min_w(px(0.0))
                         .gap(px(10.0))
                         .p(px(16.0))
@@ -206,16 +211,23 @@ impl DashboardView {
                                 .text_color(theme.muted_foreground)
                                 .child(subtitle),
                         )
+                        .child(editor.clone())
                         .child(
                             div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
                                 .text_size(scaled(11.0))
                                 .text_color(theme.muted_foreground)
                                 .child(format!(
-                                    "{} / 16,000 characters",
+                                    "{} / 64,000 characters",
                                     editor.read(cx).input.text().chars().count()
+                                ))
+                                .child(format!(
+                                    "{} words",
+                                    editor.read(cx).input.text().split_whitespace().count()
                                 )),
-                        )
-                        .child(editor.clone()),
+                        ),
                 );
             }
             let form = div().flex().flex_col().w_full().min_w(px(0.0)).gap(px(18.0))
@@ -236,7 +248,14 @@ impl DashboardView {
                 .child(div().flex().items_start().gap(px(8.0)).pb(px(12.0))
                     .child(icons::icon(&theme, Icon::Info, 13.0))
                     .child(div().text_size(scaled(11.0)).text_color(theme.muted_foreground).whitespace_normal()
-                        .child("Select a profile to include this context in AI requests. Changes apply to the next answer. Connected accounts sync saved profiles to your workspace.")));
+                        .child("Choose this profile in the top pill before starting a meeting or chat. Your full background and meeting brief are included with every answer, alongside recent conversation. Saved edits apply to the next answer. Connected accounts sync profiles across your workspace.")))
+                .child(div().flex().justify_end().gap(px(8.0))
+                    .child(action_button("cancel-profile-bottom", &theme, "Cancel", cx, |this, _, _| {
+                        this.profile_edit = None;
+                        this.settings.error = None;
+                    }))
+                    .child(primary("save-profile-bottom", "Save profile", Icon::Check, theme, cx,
+                        |this, cx, _| this.save_profile(cx))));
             return body
                 .child(crate::ui::widgets::motion::reveal(
                     form,
@@ -579,8 +598,8 @@ impl DashboardView {
 }
 
 fn context_preview(theme: Theme, title: &'static str, text: &str) -> impl IntoElement {
-    let excerpt = text.chars().take(600).collect::<String>();
-    let excerpt = if text.chars().count() > 600 {
+    let excerpt = text.chars().take(240).collect::<String>();
+    let excerpt = if text.chars().count() > 240 {
         format!("{excerpt}…")
     } else {
         excerpt
@@ -599,7 +618,10 @@ fn context_preview(theme: Theme, title: &'static str, text: &str) -> impl IntoEl
                 .text_size(scaled(10.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.muted_foreground)
-                .child(title),
+                .child(format!(
+                    "{title} · {} words",
+                    text.split_whitespace().count()
+                )),
         )
         .child(
             div()

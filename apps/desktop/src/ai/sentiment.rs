@@ -210,6 +210,7 @@ pub async fn generate(
             &config,
             &[Message::user(request(&sample, language))],
             &engine::TurnContext {
+                reasoning_effort: None,
                 conversation_id: None,
                 system: Some(SYSTEM_PROMPT.into()),
                 images: Vec::new(),

@@ -1,5 +1,6 @@
 import type * as Router from "@tanstack/react-router";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -147,8 +148,14 @@ it("renders usage, payment management and devices, and refreshes on server event
   expect(
     screen.getByRole("button", { name: "Manage subscription & payment method" })
   ).toBeInTheDocument();
+  // The signed-in DOM can render before the EventSource effect subscribes.
+  await waitFor(() =>
+    expect(MockEvents.current.listeners.get("changed")).toBeTypeOf("function")
+  );
   const calls = request.mock.calls.length;
-  MockEvents.current.listeners.get("changed")?.();
+  await act(() => {
+    MockEvents.current.listeners.get("changed")?.();
+  });
   await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(calls));
   fireEvent.click(screen.getByRole("button", { name: "Remove" }));
   await waitFor(() =>

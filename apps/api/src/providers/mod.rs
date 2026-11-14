@@ -27,8 +27,11 @@ use tokio_tungstenite::tungstenite::{Message as UpstreamMessage, client::IntoCli
 use tracing::Instrument;
 use uuid::Uuid;
 
-// Full reusable profiles plus recent meeting speech, history and images.
-const MAX_CHAT_CONTEXT_BYTES: i64 = 768_000;
+// Room for 64K background + 84K brief (including embedded JSON escaping),
+// 40K transcript, 256K question, 32K history, prompts and image accounting.
+// Character limits can use four UTF-8 bytes each; retain a bounded budget below
+// the route's 4 MiB body limit rather than rejecting valid desktop questions.
+const MAX_CHAT_CONTEXT_BYTES: i64 = 3 * 1024 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -494,11 +497,19 @@ mod tests {
         let messages = [
             ChatMessage {
                 role: "system".into(),
-                content: json!(format!("{profile}\n{}", "é".repeat(40_000))),
+                content: json!(format!(
+                    "{profile}\n{}\n{}",
+                    "🦀".repeat(40_000),
+                    "🦀".repeat(16_000)
+                )),
             },
             ChatMessage {
                 role: "user".into(),
-                content: json!("Recent history".repeat(3_000)),
+                content: json!("🦀".repeat(32_000)),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: json!("🦀".repeat(256_000)),
             },
         ];
         assert!(validate_messages(&messages).is_ok());

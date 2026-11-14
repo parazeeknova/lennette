@@ -3522,6 +3522,7 @@ impl Overlay {
             && self.conversation.messages().is_empty()
             && self.streaming_text.is_empty()
             && !self.chat.is_streaming()
+            && !self.capture_sending
     }
 
     /// The live transcript, pinned to the top half of the panel so the
@@ -4329,6 +4330,10 @@ impl Overlay {
             .or_else(|| self.chat_choices.first().map(|(_, model)| model.clone()));
         self.model_provider = Some(provider);
         if let Some(model) = selected {
+            if self.model.as_deref() != Some(model.as_str()) {
+                self.thinking_effort = None;
+                self.thinking_menu_open = false;
+            }
             self.model = Some(model.clone());
             self.persist_managed_model(&model);
         }
@@ -6199,6 +6204,45 @@ mod tests {
             database_ready: false,
         };
         (path, Overlay::new(services, None, None, None, None))
+    }
+
+    #[test]
+    fn first_screenshot_preparation_keeps_message_list_visible() {
+        let (path, mut overlay) = fixture();
+        assert!(overlay.show_empty_wordmark());
+        overlay.capture_sending = true;
+        assert!(!overlay.show_empty_wordmark());
+        overlay.capture_sending = false;
+        assert!(overlay.show_empty_wordmark());
+        drop(overlay);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn managed_catalog_replacement_resets_thinking_only_when_model_changes() {
+        let (path, mut overlay) = fixture();
+        let models = || {
+            vec![crate::managed::catalog::Model {
+                id: "gemini-3.5-flash-lite".into(),
+                name: "Fast".into(),
+                multiplier: 1,
+                plus_only: false,
+            }]
+        };
+        overlay.model = Some("gemini-4-hydrogen".into());
+        overlay.thinking_effort = Some("high".into());
+        overlay.thinking_menu_open = true;
+        overlay.apply_managed_models(models());
+        assert_eq!(overlay.model.as_deref(), Some("gemini-3.5-flash-lite"));
+        assert!(overlay.thinking_effort.is_none());
+        assert!(!overlay.thinking_menu_open);
+        overlay.thinking_effort = Some("high".into());
+        overlay.thinking_menu_open = true;
+        overlay.apply_managed_models(models());
+        assert_eq!(overlay.thinking_effort.as_deref(), Some("high"));
+        assert!(overlay.thinking_menu_open);
+        drop(overlay);
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

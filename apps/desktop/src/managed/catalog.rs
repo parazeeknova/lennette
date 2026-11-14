@@ -26,6 +26,9 @@ impl CachedCatalog {
         self.owner.same_session(client) && self.fetched_at.elapsed() < CACHE_TTL
     }
 }
+// Hold across fetching and publication so an older response cannot replace a
+// newer explicit refresh. Cache reads remain independent of network requests.
+static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static CATALOG: std::sync::Mutex<Option<CachedCatalog>> = std::sync::Mutex::new(None);
 
 pub(crate) fn reasoning_efforts(client: &Client, model: &str) -> &'static [&'static str] {
@@ -88,6 +91,7 @@ pub async fn models(client: &Client) -> Result<Vec<Model>, String> {
 }
 
 pub async fn refresh_models(client: &Client) -> Result<Vec<Model>, String> {
+    let _refresh = REFRESH.lock().await;
     let catalog = client.request(reqwest::Method::GET, "/v1/catalog", &());
     let usage = client.request(reqwest::Method::GET, "/v1/billing/usage", &());
     let (catalog, usage) = tokio::try_join!(catalog, usage).map_err(|e| e.to_string())?;

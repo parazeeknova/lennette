@@ -38,6 +38,8 @@ pub enum ChatEvent {
 /// Extra context for one turn.
 #[derive(Debug, Clone, Default)]
 pub struct TurnContext {
+    /// Foreground preference; omitted/background requests use the fastest supported level.
+    pub reasoning_effort: Option<String>,
     /// Associate only foreground chat turns with the browser companion.
     pub conversation_id: Option<uuid::Uuid>,
     /// System prompt steering the model.
@@ -105,10 +107,13 @@ pub fn build_body(
         messages.push(openai_message(message, images));
     }
     let mut body = json!({ "model": config.model, "messages": messages, "stream": true });
-    if provider.id == "merge-gateway" && config.model == crate::ai::models::MERGE_MODEL {
-        // Meeting answers need the final response promptly, rather than a long
-        // reasoning stream. This control is supported by the pinned DeepSeek model.
-        body["reasoning_effort"] = json!("none");
+    if config.custom.is_none()
+        && let Some(effort) = lennette_protocol::thinking::reasoning_effort(
+            &config.model,
+            context.reasoning_effort.as_deref(),
+        )
+    {
+        body["reasoning_effort"] = json!(effort);
     }
     body
 }
@@ -341,6 +346,18 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
 
     let mut body = build_body(provider, config, history, context);
     if managed_session {
+        // Negotiate with the running server so a desktop update remains usable
+        // before the API rollout adds minimal/xhigh to its accepted values.
+        let levels =
+            crate::managed::catalog::reasoning_efforts(managed_account.unwrap(), &config.model);
+        if let Some(effort) = context
+            .reasoning_effort
+            .as_deref()
+            .filter(|effort| levels.contains(effort))
+            .or_else(|| levels.first().copied())
+        {
+            body["reasoning_effort"] = json!(effort);
+        }
         body["max_tokens"] = json!(2048);
         body["relay_live"] =
             json!(context.conversation_id.is_some() && !crate::managed::meeting_sync_deferred());
@@ -536,6 +553,7 @@ mod tests {
 
     fn context(system: &str) -> TurnContext {
         TurnContext {
+            reasoning_effort: None,
             conversation_id: None,
             system: Some(system.into()),
             images: vec![],
@@ -555,11 +573,45 @@ mod tests {
     }
 
     #[test]
+    fn requests_apply_fast_defaults_and_explicit_supported_thinking_levels() {
+        let provider = ChatProvider::by_id("gemini").unwrap();
+        let history = [Message::user("hello")];
+        for (model, default) in [
+            ("gemini-3.5-flash-lite", "minimal"),
+            ("gemini-3.8-flash", "low"),
+            ("gemini-4-hydrogen", "low"),
+            ("deepseek-ai/DeepSeek-V4.1-Flash-1017", "none"),
+        ] {
+            let config = ProviderConfig::new("gemini", "key", model);
+            let body = build_body(provider, &config, &history, &TurnContext::default());
+            assert_eq!(body["reasoning_effort"], default);
+            let body = build_body(
+                provider,
+                &config,
+                &history,
+                &TurnContext {
+                    reasoning_effort: Some("high".into()),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(body["reasoning_effort"], "high");
+            assert_eq!(body["stream"], true);
+        }
+        let config = ProviderConfig::new("gemini", "key", "unknown-model");
+        assert!(
+            build_body(provider, &config, &history, &TurnContext::default())
+                .get("reasoning_effort")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn image_attaches_to_openai_content_array() {
         let provider = ChatProvider::by_id("gemini").unwrap();
         let config = ProviderConfig::new("gemini", "k", "gpt-4o");
         let history = [Message::user("what is this")];
         let context = TurnContext {
+            reasoning_effort: None,
             conversation_id: None,
             system: None,
             images: vec!["QUJD".into(), "REVG".into()],
@@ -587,6 +639,7 @@ mod tests {
                 Message::user("look"),
             ],
             &TurnContext {
+                reasoning_effort: None,
                 conversation_id: None,
                 system: None,
                 images: vec!["QUJD".into()],

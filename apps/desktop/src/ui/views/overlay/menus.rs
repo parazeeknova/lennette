@@ -3,7 +3,11 @@ use super::*;
 
 impl Overlay {
     pub(super) fn selection_menu(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        if !self.model_menu_open && !self.prompt_menu_open && !self.profile_menu_open {
+        if !self.model_menu_open
+            && !self.prompt_menu_open
+            && !self.profile_menu_open
+            && !self.thinking_menu_open
+        {
             return None;
         }
         let theme = self.theme;
@@ -12,6 +16,8 @@ impl Overlay {
             .on_mouse_down_out(cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
                 let bounds = if this.model_menu_open {
                     &this.model_bounds
+                } else if this.thinking_menu_open {
+                    &this.thinking_bounds
                 } else if this.profile_menu_open {
                     &this.profile_bounds
                 } else {
@@ -156,6 +162,7 @@ impl Overlay {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.model_provider = Some(provider.clone());
                             this.select_model(&model);
+                            this.thinking_menu_open = !this.thinking_levels().is_empty();
                             this.focus_composer = true;
                             cx.notify();
                         })),
@@ -242,6 +249,38 @@ impl Overlay {
                         .child(status.clone()),
                 );
             }
+        } else if self.thinking_menu_open {
+            menu = menu.child(
+                div()
+                    .p(px(8.0))
+                    .text_size(scaled(11.0))
+                    .text_color(theme.muted_foreground)
+                    .child("Thinking effort"),
+            );
+            for (index, effort) in self.thinking_levels().iter().copied().enumerate() {
+                rows = rows.child(
+                    self.menu_row(
+                        ("thinking-option", index),
+                        self.current_thinking_effort() == Some(effort),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(lennette_protocol::thinking::effort_label(effort)),
+                    )
+                    .children((index == 0).then(|| {
+                        div()
+                            .text_size(scaled(10.0))
+                            .text_color(theme.muted_foreground)
+                            .child("Fastest")
+                    }))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.thinking_effort = Some(effort.to_owned());
+                        this.thinking_menu_open = false;
+                        cx.notify();
+                    })),
+                );
+            }
         } else if self.profile_menu_open {
             rows = rows.child(self.profile_option(None, "No context".into(), 0, cx));
             for (index, profile) in self.profile_choices.iter().enumerate() {
@@ -267,6 +306,8 @@ impl Overlay {
         menu = menu.child(rows);
         let bounds = if self.model_menu_open {
             self.model_bounds.get()
+        } else if self.thinking_menu_open {
+            self.thinking_bounds.get()
         } else if self.profile_menu_open {
             self.profile_bounds.get()
         } else {
@@ -290,6 +331,8 @@ impl Overlay {
                                     "pill-dropdown",
                                     if self.model_menu_open {
                                         0usize
+                                    } else if self.thinking_menu_open {
+                                        3
                                     } else if self.profile_menu_open {
                                         1
                                     } else {

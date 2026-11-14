@@ -22,11 +22,8 @@ fn credentials(state: &AppState, model: Model) -> (&url::Url, &str) {
 }
 
 fn payload(model: Model, messages: &[Value], max_tokens: i64, effort: &str) -> Value {
-    let effort = if matches!(model.provider, ModelProvider::Gemini) && effort == "none" {
-        "low"
-    } else {
-        effort
-    };
+    let effort =
+        lennette_protocol::thinking::reasoning_effort(model.id, Some(effort)).unwrap_or("none");
     json!({"model":model.id,"messages":messages,"stream":true,"max_tokens":max_tokens,
         "reasoning_effort":effort,"stream_options":{"include_usage":true}})
 }
@@ -213,8 +210,11 @@ pub async fn chat(
     if !(1..=4096).contains(&max_tokens) {
         return Err(ApiError::BadRequest("max_tokens must be 1 to 4096".into()));
     }
-    let effort = request.reasoning_effort.as_deref().unwrap_or("low");
-    if !matches!(effort, "none" | "low" | "medium" | "high") {
+    let effort = request.reasoning_effort.as_deref().unwrap_or("none");
+    if !matches!(
+        effort,
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    ) {
         return Err(ApiError::BadRequest("unsupported reasoning effort".into()));
     }
     state
@@ -342,6 +342,35 @@ pub async fn chat(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payload_normalizes_effort_for_each_model_and_fallback() {
+        let catalog = plans::models();
+        for model in &catalog {
+            let expected = lennette_protocol::thinking::reasoning_efforts(model.id)[0];
+            assert_eq!(
+                payload(*model, &[], 2048, "none")["reasoning_effort"],
+                expected
+            );
+            assert_eq!(
+                payload(*model, &[], 2048, "high")["reasoning_effort"],
+                "high"
+            );
+        }
+        let hydrogen = *catalog
+            .iter()
+            .find(|m| m.id == "gemini-4-hydrogen")
+            .unwrap();
+        let deepseek = *catalog.iter().find(|m| m.id == DEEPSEEK).unwrap();
+        assert_eq!(
+            payload(hydrogen, &[], 2048, "xhigh")["reasoning_effort"],
+            "xhigh"
+        );
+        assert_eq!(
+            payload(deepseek, &[], 2048, "xhigh")["reasoning_effort"],
+            "none"
+        );
+    }
     #[test]
     fn reasoning_progress_has_idle_and_absolute_deadlines_without_extending_visible_stalls() {
         let start = tokio::time::Instant::now();

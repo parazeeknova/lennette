@@ -297,6 +297,7 @@ pub struct Settings {
     pub startup_privacy: bool,
     pub chat_provider: String,
     pub hide_app_icon: bool,
+    pub hide_top_pill: bool,
     pub always_on_top: bool,
     pub reduce_motion: bool,
     pub overlay_size: String,
@@ -339,6 +340,7 @@ impl Default for Settings {
             startup_privacy: false,
             chat_provider: String::new(),
             hide_app_icon: false,
+            hide_top_pill: false,
             always_on_top: true,
             reduce_motion: false,
             overlay_size: "sm".to_owned(),
@@ -428,6 +430,7 @@ impl Settings {
             startup_privacy: flag("startup_privacy", defaults.startup_privacy),
             chat_provider: text("chat_provider", &defaults.chat_provider),
             hide_app_icon: flag(keys::HIDE_APP_ICON, defaults.hide_app_icon),
+            hide_top_pill: flag("hide_top_pill", defaults.hide_top_pill),
             always_on_top: flag(keys::ALWAYS_ON_TOP, defaults.always_on_top),
             reduce_motion: flag(keys::REDUCE_MOTION, defaults.reduce_motion),
             overlay_size: text(keys::OVERLAY_SIZE, &defaults.overlay_size),
@@ -466,8 +469,14 @@ impl Settings {
                 Some(prompt) => prompt.to_owned(),
             },
             cli_connection: text(keys::CLI_CONNECTION, &defaults.cli_connection),
-            personal_context: text("personal_context", "").chars().take(16_000).collect(),
-            meeting_context: text("meeting_context", "").chars().take(16_000).collect(),
+            personal_context: text("personal_context", "")
+                .chars()
+                .take(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS)
+                .collect(),
+            meeting_context: text("meeting_context", "")
+                .chars()
+                .take(lennette_protocol::MAX_MEETING_CONTEXT_CHARS)
+                .collect(),
             auto_response: get("auto_response")
                 .map(AutoResponse::parse)
                 .unwrap_or_default(),
@@ -519,6 +528,7 @@ impl Settings {
             ("startup_privacy", self.startup_privacy.to_string()),
             ("chat_provider", self.chat_provider.clone()),
             (keys::HIDE_APP_ICON, self.hide_app_icon.to_string()),
+            ("hide_top_pill", self.hide_top_pill.to_string()),
             (keys::ALWAYS_ON_TOP, self.always_on_top.to_string()),
             (keys::REDUCE_MOTION, self.reduce_motion.to_string()),
             (keys::OVERLAY_SIZE, self.overlay_size.clone()),
@@ -557,11 +567,17 @@ impl Settings {
             (keys::CLI_CONNECTION, self.cli_connection.clone()),
             (
                 "personal_context",
-                self.personal_context.chars().take(16_000).collect(),
+                self.personal_context
+                    .chars()
+                    .take(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS)
+                    .collect(),
             ),
             (
                 "meeting_context",
-                self.meeting_context.chars().take(16_000).collect(),
+                self.meeting_context
+                    .chars()
+                    .take(lennette_protocol::MAX_MEETING_CONTEXT_CHARS)
+                    .collect(),
             ),
             ("auto_response", self.auto_response.as_str().to_owned()),
             ("response_pace", self.response_pace.label().to_owned()),
@@ -614,10 +630,42 @@ mod tests {
             FOLLOW_UP_PROMPT
         );
         Settings::set(&db, "smart_follow_ups_prompt", "My custom questions").unwrap();
-        Settings::set(&db, "personal_context", &"é".repeat(17_000)).unwrap();
+        Settings::set(
+            &db,
+            "personal_context",
+            &"é".repeat(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS + 1),
+        )
+        .unwrap();
         let loaded = Settings::load(&db).unwrap();
         assert_eq!(loaded.smart_follow_ups_prompt, "My custom questions");
-        assert_eq!(loaded.personal_context.chars().count(), 16_000);
+        assert_eq!(
+            loaded.personal_context.chars().count(),
+            lennette_protocol::MAX_PROFILE_CONTEXT_CHARS
+        );
+    }
+
+    #[test]
+    fn meeting_brief_preserves_84k_unicode_characters_and_bounds_larger_values() {
+        let db = database();
+        let settings = Settings {
+            meeting_context: "🦀".repeat(lennette_protocol::MAX_MEETING_CONTEXT_CHARS),
+            ..Settings::default()
+        };
+        settings.save(&db).unwrap();
+        assert_eq!(
+            Settings::load(&db).unwrap().meeting_context,
+            settings.meeting_context
+        );
+        Settings::set(
+            &db,
+            "meeting_context",
+            &(settings.meeting_context.clone() + "overflow"),
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&db).unwrap().meeting_context,
+            settings.meeting_context
+        );
     }
 
     #[test]
@@ -646,6 +694,7 @@ mod tests {
             startup_privacy: true,
             chat_provider: "gemini".into(),
             hide_app_icon: true,
+            hide_top_pill: true,
             always_on_top: false,
             reduce_motion: true,
             overlay_size: "lg".into(),

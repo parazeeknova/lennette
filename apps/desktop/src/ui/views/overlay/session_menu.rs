@@ -57,6 +57,7 @@ impl Overlay {
         self.app_menu_open = false;
         self.restore_menu_open = false;
         self.model_menu_open = false;
+        self.thinking_menu_open = false;
         self.prompt_menu_open = false;
         self.profile_menu_open = false;
         self.context_menu_open = false;

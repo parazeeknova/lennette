@@ -3,6 +3,9 @@ use super::settings;
 use crate::db::connection::{Connection, OptionalExtension, params};
 
 pub const SELECTED_KEY: &str = "selected_context_profile";
+pub use lennette_protocol::{
+    MAX_MEETING_CONTEXT_CHARS, MAX_PROFILE_CONTEXT_CHARS as MAX_CONTEXT_CHARS,
+};
 const MIGRATED_KEY: &str = "context_profiles_migrated";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,10 +69,10 @@ pub fn save(connection: &Connection, profile: &Profile) -> Result<(), String> {
     if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
         return Err("Give the profile a name of 1 to 80 characters.".into());
     }
-    if profile.personal_context.chars().count() > 16_000
-        || profile.meeting_context.chars().count() > 16_000
+    if profile.personal_context.chars().count() > MAX_CONTEXT_CHARS
+        || profile.meeting_context.chars().count() > MAX_MEETING_CONTEXT_CHARS
     {
-        return Err("Keep each context field under 16,000 characters.".into());
+        return Err("Keep background at or below 64,000 characters and the meeting brief at or below 84,000.".into());
     }
     connection.execute("INSERT INTO context_profiles (id, name, personal_context, meeting_context) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(id) DO UPDATE SET name = excluded.name, personal_context = excluded.personal_context, meeting_context = excluded.meeting_context, updated_at = datetime('now')",
         params![profile.id, name, profile.personal_context.trim(), profile.meeting_context.trim()]).map_err(|e| e.to_string())?;
@@ -98,7 +101,7 @@ pub fn migrate_legacy(connection: &Connection) -> crate::db::Result<()> {
         return Ok(());
     }
     let tx = connection.unchecked_transaction()?;
-    tx.execute("INSERT OR IGNORE INTO context_profiles (id, name, personal_context, meeting_context) VALUES ('legacy-precontext', 'My profile', ?1, ?2)", params![personal.chars().take(16_000).collect::<String>(), meeting.chars().take(16_000).collect::<String>()])?;
+    tx.execute("INSERT OR IGNORE INTO context_profiles (id, name, personal_context, meeting_context) VALUES ('legacy-precontext', 'My profile', ?1, ?2)", params![personal.chars().take(MAX_CONTEXT_CHARS).collect::<String>(), meeting.chars().take(MAX_MEETING_CONTEXT_CHARS).collect::<String>()])?;
     if settings::get(&tx, SELECTED_KEY)?.is_none() {
         settings::set(&tx, SELECTED_KEY, "legacy-precontext")?;
     }
@@ -111,6 +114,34 @@ pub fn migrate_legacy(connection: &Connection) -> crate::db::Result<()> {
 mod tests {
     use super::*;
     use crate::db::Database;
+    #[test]
+    fn long_unicode_context_round_trips_and_remains_syncable() {
+        let db = Database::in_memory().unwrap();
+        let account = uuid::Uuid::new_v4();
+        crate::db::sync::bind(db.connection(), account, false).unwrap();
+        let mut profile = Profile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Full meeting brief".into(),
+            personal_context: "🦀".repeat(MAX_CONTEXT_CHARS),
+            meeting_context: "\"".repeat(MAX_MEETING_CONTEXT_CHARS),
+        };
+        save(db.connection(), &profile).unwrap();
+        select(db.connection(), Some(&profile.id)).unwrap();
+        assert_eq!(selected(db.connection()).unwrap(), Some(profile.clone()));
+        let pending = crate::db::sync::pending(db.connection(), account).unwrap();
+        let mutation = &pending
+            .iter()
+            .find(|p| p.table == "context_profiles")
+            .unwrap()
+            .mutation;
+        mutation.validate_record().unwrap();
+        profile.meeting_context.push('é');
+        assert!(save(db.connection(), &profile).is_err());
+        profile.meeting_context.pop();
+        profile.personal_context.push('é');
+        assert!(save(db.connection(), &profile).is_err());
+    }
+
     #[test]
     fn profiles_round_trip_edit_select_and_delete_without_dangling_selection() {
         let db = Database::in_memory().unwrap();

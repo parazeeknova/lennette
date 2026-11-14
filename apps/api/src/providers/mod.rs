@@ -27,6 +27,12 @@ use tokio_tungstenite::tungstenite::{Message as UpstreamMessage, client::IntoCli
 use tracing::Instrument;
 use uuid::Uuid;
 
+// Room for 64K background + 84K brief (including embedded JSON escaping),
+// 40K transcript, 256K question, 32K history, prompts and image accounting.
+// Character limits can use four UTF-8 bytes each; retain a bounded budget below
+// the route's 4 MiB body limit rather than rejecting valid desktop questions.
+const MAX_CHAT_CONTEXT_BYTES: i64 = 3 * 1024 * 1024;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChatMessage {
@@ -102,7 +108,7 @@ fn validate_messages(messages: &[ChatMessage]) -> Result<i64> {
             _ => return Err(ApiError::BadRequest("invalid message content".into())),
         }
     }
-    if budget > 96000 {
+    if budget > MAX_CHAT_CONTEXT_BYTES {
         return Err(ApiError::BadRequest(
             "context exceeds managed request limit".into(),
         ));
@@ -469,7 +475,7 @@ mod tests {
         assert!(
             validate_messages(&[ChatMessage {
                 role: "user".into(),
-                content: json!("x".repeat(96000))
+                content: json!("x".repeat(MAX_CHAT_CONTEXT_BYTES as usize))
             }])
             .is_err()
         );
@@ -480,5 +486,32 @@ mod tests {
             }])
             .is_ok()
         );
+    }
+
+    #[test]
+    fn proxy_accepts_full_unicode_profiles_with_recent_speech_and_history() {
+        let profile = serde_json::json!({
+            "about_me": "🦀".repeat(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS),
+            "meeting_brief": "🦀".repeat(lennette_protocol::MAX_MEETING_CONTEXT_CHARS),
+        });
+        let messages = [
+            ChatMessage {
+                role: "system".into(),
+                content: json!(format!(
+                    "{profile}\n{}\n{}",
+                    "🦀".repeat(40_000),
+                    "🦀".repeat(16_000)
+                )),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: json!("🦀".repeat(32_000)),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: json!("🦀".repeat(256_000)),
+            },
+        ];
+        assert!(validate_messages(&messages).is_ok());
     }
 }

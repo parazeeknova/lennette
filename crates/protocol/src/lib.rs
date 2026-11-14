@@ -4,6 +4,8 @@ use serde_json::Value;
 use uuid::Uuid;
 use validator::Validate;
 
+pub mod thinking;
+
 /// Parent UUIDs remain stable for speech/chat ownership and foreign references.
 /// One-to-one children use that UUID as a local key, but need independent cloud
 /// identities because cloud records share one (account, id) primary key.
@@ -20,6 +22,10 @@ pub fn sync_record_id(account: Uuid, table: &str, local_id: &str) -> Uuid {
 
 pub const API_VERSION: u16 = 1;
 pub const MAX_RECORD_BYTES: usize = 256 * 1024;
+pub const MAX_PROFILE_CONTEXT_CHARS: usize = 64_000;
+pub const MAX_MEETING_CONTEXT_CHARS: usize = 84_000;
+// Two Unicode context fields, including JSON escaping and record metadata.
+pub const MAX_PROFILE_RECORD_BYTES: usize = 1024 * 1024;
 pub const MAX_BATCH: usize = 100;
 pub const MAX_CHAT_IMAGE_EDGE: u32 = 1024;
 pub const MAX_CHAT_IMAGE_BYTES: usize = 512 * 1024;
@@ -83,8 +89,13 @@ impl Mutation {
         if self.base_revision < 0 {
             return Err("negative revision");
         }
-        if !self.data.is_object() || self.data.to_string().len() > MAX_RECORD_BYTES {
-            return Err("record must be an object of at most 256 KiB");
+        let limit = if self.kind == RecordKind::Profile {
+            MAX_PROFILE_RECORD_BYTES
+        } else {
+            MAX_RECORD_BYTES
+        };
+        if !self.data.is_object() || self.data.to_string().len() > limit {
+            return Err("record must be an object within its size limit");
         }
         // Sync preferences, never credentials or device-specific settings.
         if self.kind == RecordKind::Settings {
@@ -236,6 +247,34 @@ mod tests {
         assert_eq!(
             serde_json::to_value(RecordKind::Transcript).unwrap(),
             "transcript"
+        );
+    }
+
+    #[test]
+    fn larger_records_are_reserved_for_profiles() {
+        let data = serde_json::json!({
+            "personal_context": "\u{0001}".repeat(MAX_PROFILE_CONTEXT_CHARS),
+            "meeting_context": "\u{0001}".repeat(MAX_MEETING_CONTEXT_CHARS),
+        });
+        assert!(
+            mutation(RecordKind::Profile, data.clone())
+                .validate_record()
+                .is_ok()
+        );
+        assert!(
+            mutation(RecordKind::Message, data)
+                .validate_record()
+                .is_err()
+        );
+        assert!(
+            mutation(
+                RecordKind::Profile,
+                serde_json::json!({
+                    "personal_context": "x".repeat(MAX_PROFILE_RECORD_BYTES),
+                })
+            )
+            .validate_record()
+            .is_err()
         );
     }
 }

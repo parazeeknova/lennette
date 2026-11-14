@@ -10,9 +10,20 @@ pub(super) struct ProfileDraft {
     personal: gpui::Entity<Editor>,
     meeting: gpui::Entity<Editor>,
     observers: Vec<gpui::Subscription>,
+    section: usize,
+    preview: bool,
+    discard: bool,
+    original: [String; 3],
 }
 
 impl ProfileDraft {
+    fn dirty(&self, cx: &gpui::App) -> bool {
+        [&self.name, &self.personal, &self.meeting]
+            .iter()
+            .zip(&self.original)
+            .any(|(editor, original)| editor.read(cx).input.text() != original)
+    }
+
     pub(super) fn sync_theme(&self, theme: Theme, cx: &mut gpui::App) {
         for editor in [&self.name, &self.personal, &self.meeting] {
             Editor::sync_theme(editor, theme, cx);
@@ -51,6 +62,14 @@ impl DashboardView {
         });
         self.profile_edit = Some(ProfileDraft {
             observers: Vec::new(),
+            section: 0,
+            preview: false,
+            discard: false,
+            original: [
+                profile.name.clone(),
+                profile.personal_context.clone(),
+                profile.meeting_context.clone(),
+            ],
             id: profile.id,
             is_new,
             name: cx.new(|cx| {
@@ -61,7 +80,7 @@ impl DashboardView {
             }),
             personal: cx.new(|cx| {
                 let mut editor = Editor::new(&profile.personal_context, self.theme, cx);
-                editor.min_height = 360.0;
+                editor.min_height = 420.0;
                 editor.max_chars = Some(store::MAX_CONTEXT_CHARS);
                 editor.placeholder =
                     "Paste your background, experience, projects and relevant examples…";
@@ -69,15 +88,15 @@ impl DashboardView {
             }),
             meeting: cx.new(|cx| {
                 let mut editor = Editor::new(&profile.meeting_context, self.theme, cx);
-                editor.min_height = 360.0;
-                editor.max_chars = Some(store::MAX_CONTEXT_CHARS);
+                editor.min_height = 420.0;
+                editor.max_chars = Some(store::MAX_MEETING_CONTEXT_CHARS);
                 editor.placeholder =
                     "Add the agenda, participants, goals, facts, constraints and desired outcome…";
                 editor
             }),
         });
         if let Some(draft) = &mut self.profile_edit {
-            for editor in [&draft.personal, &draft.meeting] {
+            for editor in [&draft.name, &draft.personal, &draft.meeting] {
                 draft
                     .observers
                     .push(cx.observe(editor, |_, _, cx| cx.notify()));
@@ -160,110 +179,234 @@ impl DashboardView {
             body = body.child(crate::ui::controls::warning(&theme, error));
         }
         if let Some(draft) = &self.profile_edit {
-            let mut contexts = div()
+            let dirty = draft.dirty(cx);
+            let mut tabs = div().flex().flex_wrap().gap(px(8.0));
+            for (section, label) in [(0, "Your background"), (1, "Meeting brief")] {
+                let label = if draft.section == section {
+                    if section == 0 {
+                        "● Your background"
+                    } else {
+                        "● Meeting brief"
+                    }
+                } else {
+                    label
+                };
+                tabs = tabs.child(action_button(
+                    ("context-section", section),
+                    &theme,
+                    label,
+                    cx,
+                    move |this, cx, window| {
+                        if let Some(draft) = &mut this.profile_edit {
+                            draft.section = section;
+                            if !draft.preview {
+                                let editor = if section == 0 {
+                                    &draft.personal
+                                } else {
+                                    &draft.meeting
+                                };
+                                editor.read(cx).focus(window);
+                            }
+                        }
+                        cx.notify();
+                    },
+                ));
+            }
+            let (editor, title, hint, limit) = if draft.section == 0 {
+                (
+                    &draft.personal,
+                    "Your background",
+                    "Capture your role, experience and concrete examples. Keep reusable facts here.",
+                    store::MAX_CONTEXT_CHARS,
+                )
+            } else {
+                (
+                    &draft.meeting,
+                    "Meeting brief",
+                    "Set the agenda, participants, goals, constraints and the outcome you want.",
+                    store::MAX_MEETING_CONTEXT_CHARS,
+                )
+            };
+            let text = editor.read(cx).input.text().to_owned();
+            let count = text.chars().count();
+            let mut workspace = div()
                 .flex()
                 .flex_col()
                 .w_full()
                 .min_w(px(0.0))
-                .gap(px(20.0));
-            for (icon, title, subtitle, editor) in [
-                (
-                    Icon::UserRound,
-                    "01 · Your background",
-                    "Your role, experience, projects and examples. Reuse this profile across meetings.",
-                    &draft.personal,
-                ),
-                (
-                    Icon::MessagesSquare,
-                    "02 · Meeting brief & direction",
-                    "Who is attending, what matters, where you want the conversation to go and what success looks like.",
-                    &draft.meeting,
-                ),
-            ] {
-                contexts = contexts.child(
+                .gap(px(14.0))
+                .p(px(18.0))
+                .rounded(px(14.0))
+                .border_1()
+                .border_color(theme.control_border(false))
+                .bg(surfaces.card())
+                .child(
                     div()
                         .flex()
-                        .flex_col()
-                        .w_full()
-                        .min_w(px(0.0))
+                        .flex_wrap()
+                        .items_center()
+                        .justify_between()
                         .gap(px(10.0))
-                        .p(px(16.0))
-                        .rounded(px(14.0))
-                        .border_1()
-                        .border_color(theme.control_border(false))
-                        .bg(surfaces.card())
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(icons::icon(&theme, icon, 15.0))
-                                .child(
-                                    div()
-                                        .text_size(scaled(13.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(title),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_size(scaled(11.0))
-                                .text_color(theme.muted_foreground)
-                                .child(subtitle),
-                        )
-                        .child(editor.clone())
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .text_size(scaled(11.0))
-                                .text_color(theme.muted_foreground)
-                                .child(format!(
-                                    "{} / 64,000 characters",
-                                    editor.read(cx).input.text().chars().count()
-                                ))
-                                .child(format!(
-                                    "{} words",
-                                    editor.read(cx).input.text().split_whitespace().count()
-                                )),
-                        ),
+                        .child(tabs)
+                        .child(action_button(
+                            "context-preview",
+                            &theme,
+                            if draft.preview {
+                                "Back to editing"
+                            } else {
+                                "Preview"
+                            },
+                            cx,
+                            |this, cx, _| {
+                                if let Some(draft) = &mut this.profile_edit {
+                                    draft.preview = !draft.preview;
+                                }
+                                cx.notify();
+                            },
+                        )),
+                )
+                .child(
+                    div()
+                        .text_size(scaled(15.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(scaled(12.0))
+                        .text_color(theme.muted_foreground)
+                        .whitespace_normal()
+                        .child(hint),
                 );
+            if draft.preview {
+                for (heading, content) in [
+                    ("Your background", draft.personal.read(cx).input.text()),
+                    ("Meeting brief", draft.meeting.read(cx).input.text()),
+                ] {
+                    workspace = workspace.child(
+                        div()
+                            .text_size(scaled(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(heading),
+                    );
+                    workspace = workspace.child(crate::ui::overlay::render_markdown(
+                        &theme,
+                        surfaces,
+                        if content.trim().is_empty() {
+                            "_No context added yet._"
+                        } else {
+                            content
+                        },
+                    ));
+                }
+            } else {
+                if text.trim().is_empty() {
+                    workspace = workspace.child(action_button("context-outline", &theme, "Start with a guided outline", cx, |this, cx, window| {
+                        if let Some(draft) = &this.profile_edit {
+                            let (editor, outline) = if draft.section == 0 {
+                                (&draft.personal, "## Role & background\n\n## Experience & strengths\n\n## Projects & examples\n\n## Preferences\n")
+                            } else {
+                                (&draft.meeting, "## Goal & desired outcome\n\n## Participants & roles\n\n## Agenda\n\n## Key facts & references\n\n## Constraints & open questions\n")
+                            };
+                            editor.update(cx, |editor, cx| {
+                                // Only seed an empty field; existing context is never replaced.
+                                if editor.input.is_empty() { editor.input.set_text(outline); }
+                                editor.focus(window);
+                                cx.notify();
+                            });
+                        }
+                    }));
+                }
+                workspace = workspace.child(editor.clone()).child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .justify_between()
+                        .gap(px(8.0))
+                        .text_size(scaled(11.0))
+                        .text_color(theme.muted_foreground)
+                        .child(format!(
+                            "{count} / {limit} characters · {} words",
+                            text.split_whitespace().count()
+                        ))
+                        .child("Markdown headings and lists supported"),
+                );
+                if count >= limit {
+                    workspace = workspace.child(crate::ui::controls::warning(
+                        &theme,
+                        "Character limit reached. Shorten this section before adding more.",
+                    ));
+                }
             }
-            let form = div().flex().flex_col().w_full().min_w(px(0.0)).gap(px(18.0))
-                .child(div().flex().items_center().justify_between().gap(px(12.0))
+            let mut form = div().flex().flex_col().w_full().min_w(px(0.0)).gap(px(18.0))
+                .child(div().flex().flex_wrap().items_center().justify_between().gap(px(12.0))
                     .child(div().text_size(scaled(15.0)).font_weight(FontWeight::SEMIBOLD)
                         .child(if draft.is_new { "New profile" } else { "Edit profile" }))
-                    .child(div().flex().items_center().gap(px(8.0))
-                        .child(action_button("cancel-profile", &theme, "Cancel", cx, |this, _, _| {
-                            this.profile_edit = None;
-                            this.settings.error = None;
-                        }))
-                        .child(primary("save-profile", "Save profile", Icon::Check, theme, cx,
-                            |this, cx, _| this.save_profile(cx)))))
+                    .child(div().text_size(scaled(11.0)).text_color(theme.muted_foreground)
+                        .child(if dirty { "Unsaved changes" } else { "No unsaved changes" }))
+                    .child(primary("save-profile", "Save profile", Icon::Check, theme, cx, |this, cx, _| this.save_profile(cx))))
                 .child(div().flex().flex_col().gap(px(8.0)).w_full().max_w(px(420.0))
                     .child(div().text_size(scaled(12.0)).font_weight(FontWeight::MEDIUM).child("Profile name"))
                     .child(draft.name.clone()))
-                .child(contexts)
-                .child(div().flex().items_start().gap(px(8.0)).pb(px(12.0))
-                    .child(icons::icon(&theme, Icon::Info, 13.0))
-                    .child(div().text_size(scaled(11.0)).text_color(theme.muted_foreground).whitespace_normal()
-                        .child("Choose this profile in the top pill before starting a meeting or chat. Your full background and meeting brief are included with every answer, alongside recent conversation. Saved edits apply to the next answer. Connected accounts sync profiles across your workspace.")))
-                .child(div().flex().justify_end().gap(px(8.0))
-                    .child(action_button("cancel-profile-bottom", &theme, "Cancel", cx, |this, _, _| {
-                        this.profile_edit = None;
-                        this.settings.error = None;
-                    }))
-                    .child(primary("save-profile-bottom", "Save profile", Icon::Check, theme, cx,
-                        |this, cx, _| this.save_profile(cx))));
-            return body
-                .child(crate::ui::widgets::motion::reveal(
-                    form,
-                    "profile-editor-open",
-                    self.settings.settings.reduce_motion,
-                    false,
-                ))
-                .into_any_element();
+                .child(workspace)
+                .child(div().text_size(scaled(11.0)).text_color(theme.muted_foreground).whitespace_normal()
+                    .child("Choose this profile before a meeting or chat. Both sections accompany every answer. Saved edits apply to the next answer. Longer briefs can increase response time and usage. Your draft stays here when you visit another page."));
+            if draft.discard && dirty {
+                form = form.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child("Discard your unsaved changes?")
+                        .child(action_button(
+                            "keep-profile",
+                            &theme,
+                            "Keep editing",
+                            cx,
+                            |this, cx, _| {
+                                if let Some(draft) = &mut this.profile_edit {
+                                    draft.discard = false;
+                                }
+                                cx.notify();
+                            },
+                        ))
+                        .child(action_button(
+                            "discard-profile",
+                            &theme,
+                            "Discard changes",
+                            cx,
+                            |this, cx, _| {
+                                this.profile_edit = None;
+                                this.settings.error = None;
+                                cx.notify();
+                            },
+                        )),
+                );
+            } else {
+                form = form.child(action_button(
+                    "cancel-profile",
+                    &theme,
+                    "Back to profiles",
+                    cx,
+                    |this, cx, _| {
+                        if this
+                            .profile_edit
+                            .as_ref()
+                            .is_some_and(|draft| draft.dirty(cx))
+                        {
+                            if let Some(draft) = &mut this.profile_edit {
+                                draft.discard = true;
+                            }
+                        } else {
+                            this.profile_edit = None;
+                            this.settings.error = None;
+                        }
+                        cx.notify();
+                    },
+                ));
+            }
+            return body.child(form).into_any_element();
         }
         let selected = self
             .database

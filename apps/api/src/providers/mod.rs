@@ -489,7 +489,7 @@ mod tests {
     fn proxy_accepts_full_unicode_profiles_with_recent_speech_and_history() {
         let profile = serde_json::json!({
             "about_me": "🦀".repeat(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS),
-            "meeting_brief": "🦀".repeat(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS),
+            "meeting_brief": "🦀".repeat(lennette_protocol::MAX_MEETING_CONTEXT_CHARS),
         });
         let messages = [
             ChatMessage {

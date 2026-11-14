@@ -207,7 +207,7 @@ impl DashboardView {
         }
         self.renaming = false;
         self.edit_target = None;
-        self.profile_edit = None;
+        // Preserve the Context Studio draft while visiting another page.
         self.profile_delete = None;
         self.editor = None;
         self.rename_buffer.clear();

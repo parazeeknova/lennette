@@ -357,7 +357,7 @@ async fn gemini_streaming_settles_usage_before_done_and_never_exposes_provider_k
     let (state, _, id, t) = fixture().await;
     subscribe(&state, id).await;
     let mock=Router::new().route("/chat",post(|headers:HeaderMap,Json(body):Json<Value>|async move{
-        assert_eq!(headers["authorization"],"Bearer mock-gemini-key");assert_eq!(body["model"],"gemini-3.5-flash-lite");assert_eq!(body["stream_options"]["include_usage"],true);assert_eq!(body["reasoning_effort"],"low");
+        assert_eq!(headers["authorization"],"Bearer mock-gemini-key");assert_eq!(body["model"],"gemini-3.5-flash-lite");assert_eq!(body["stream_options"]["include_usage"],true);assert_eq!(body["reasoning_effort"],"minimal");
         ([(header::CONTENT_TYPE,"text/event-stream")],"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":3,\"total_tokens\":48}}\n\ndata: [DONE]\n\n")
     }));
     let (base, task) = serve(mock).await;

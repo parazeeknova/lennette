@@ -475,7 +475,7 @@ impl Settings {
                 .collect(),
             meeting_context: text("meeting_context", "")
                 .chars()
-                .take(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS)
+                .take(lennette_protocol::MAX_MEETING_CONTEXT_CHARS)
                 .collect(),
             auto_response: get("auto_response")
                 .map(AutoResponse::parse)
@@ -576,7 +576,7 @@ impl Settings {
                 "meeting_context",
                 self.meeting_context
                     .chars()
-                    .take(lennette_protocol::MAX_PROFILE_CONTEXT_CHARS)
+                    .take(lennette_protocol::MAX_MEETING_CONTEXT_CHARS)
                     .collect(),
             ),
             ("auto_response", self.auto_response.as_str().to_owned()),
@@ -641,6 +641,30 @@ mod tests {
         assert_eq!(
             loaded.personal_context.chars().count(),
             lennette_protocol::MAX_PROFILE_CONTEXT_CHARS
+        );
+    }
+
+    #[test]
+    fn meeting_brief_preserves_84k_unicode_characters_and_bounds_larger_values() {
+        let db = database();
+        let settings = Settings {
+            meeting_context: "🦀".repeat(lennette_protocol::MAX_MEETING_CONTEXT_CHARS),
+            ..Settings::default()
+        };
+        settings.save(&db).unwrap();
+        assert_eq!(
+            Settings::load(&db).unwrap().meeting_context,
+            settings.meeting_context
+        );
+        Settings::set(
+            &db,
+            "meeting_context",
+            &(settings.meeting_context.clone() + "overflow"),
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&db).unwrap().meeting_context,
+            settings.meeting_context
         );
     }
 

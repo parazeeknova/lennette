@@ -23,8 +23,9 @@ pub fn sync_record_id(account: Uuid, table: &str, local_id: &str) -> Uuid {
 pub const API_VERSION: u16 = 1;
 pub const MAX_RECORD_BYTES: usize = 256 * 1024;
 pub const MAX_PROFILE_CONTEXT_CHARS: usize = 64_000;
+pub const MAX_MEETING_CONTEXT_CHARS: usize = 84_000;
 // Two Unicode context fields, including JSON escaping and record metadata.
-pub const MAX_PROFILE_RECORD_BYTES: usize = 768 * 1024;
+pub const MAX_PROFILE_RECORD_BYTES: usize = 1024 * 1024;
 pub const MAX_BATCH: usize = 100;
 pub const MAX_CHAT_IMAGE_EDGE: u32 = 1024;
 pub const MAX_CHAT_IMAGE_BYTES: usize = 512 * 1024;
@@ -252,8 +253,8 @@ mod tests {
     #[test]
     fn larger_records_are_reserved_for_profiles() {
         let data = serde_json::json!({
-            "personal_context": "🦀".repeat(MAX_PROFILE_CONTEXT_CHARS),
-            "meeting_context": "\u{0001}".repeat(MAX_PROFILE_CONTEXT_CHARS),
+            "personal_context": "\u{0001}".repeat(MAX_PROFILE_CONTEXT_CHARS),
+            "meeting_context": "\u{0001}".repeat(MAX_MEETING_CONTEXT_CHARS),
         });
         assert!(
             mutation(RecordKind::Profile, data.clone())

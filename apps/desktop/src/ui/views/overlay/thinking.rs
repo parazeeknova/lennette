@@ -1,8 +1,16 @@
 use super::*;
-use lennette_protocol::thinking::{effort_label, reasoning_effort, reasoning_efforts};
+use lennette_protocol::thinking::{effort_label, reasoning_efforts};
 
 impl Overlay {
     pub(super) fn thinking_levels(&self) -> &'static [&'static str] {
+        if self.model_provider.as_deref() == Some(crate::managed::catalog::PROVIDER)
+            && let Some(client) = crate::managed::active()
+        {
+            return crate::managed::catalog::reasoning_efforts(
+                &client,
+                self.model.as_deref().unwrap_or_default(),
+            );
+        }
         if matches!(
             self.model_provider.as_deref(),
             Some("gemini" | "merge-gateway" | "lennette-managed")
@@ -17,10 +25,11 @@ impl Overlay {
         if self.thinking_levels().is_empty() {
             return None;
         }
-        reasoning_effort(
-            self.model.as_deref().unwrap_or_default(),
-            self.thinking_effort.as_deref(),
-        )
+        let levels = self.thinking_levels();
+        self.thinking_effort
+            .as_deref()
+            .and_then(|effort| levels.iter().copied().find(|level| *level == effort))
+            .or_else(|| levels.first().copied())
     }
 
     pub(super) fn thinking_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {

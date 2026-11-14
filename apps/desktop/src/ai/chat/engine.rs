@@ -346,6 +346,18 @@ async fn stream_chat_inner<F: std::future::Future<Output = ()>>(
 
     let mut body = build_body(provider, config, history, context);
     if managed_session {
+        // Negotiate with the running server so a desktop update remains usable
+        // before the API rollout adds minimal/xhigh to its accepted values.
+        let levels =
+            crate::managed::catalog::reasoning_efforts(managed_account.unwrap(), &config.model);
+        if let Some(effort) = context
+            .reasoning_effort
+            .as_deref()
+            .filter(|effort| levels.contains(effort))
+            .or_else(|| levels.first().copied())
+        {
+            body["reasoning_effort"] = json!(effort);
+        }
         body["max_tokens"] = json!(2048);
         body["relay_live"] =
             json!(context.conversation_id.is_some() && !crate::managed::meeting_sync_deferred());

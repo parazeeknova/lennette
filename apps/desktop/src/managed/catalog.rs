@@ -19,6 +19,7 @@ struct CachedCatalog {
     owner: Client,
     models: Vec<Model>,
     fetched_at: std::time::Instant,
+    extended_efforts: bool,
 }
 impl CachedCatalog {
     fn valid_for(&self, client: &Client) -> bool {
@@ -26,6 +27,20 @@ impl CachedCatalog {
     }
 }
 static CATALOG: std::sync::Mutex<Option<CachedCatalog>> = std::sync::Mutex::new(None);
+
+pub(crate) fn reasoning_efforts(client: &Client, model: &str) -> &'static [&'static str] {
+    let levels = lennette_protocol::thinking::reasoning_efforts(model);
+    let extended = CATALOG
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|cache| cache.owner.same_session(client) && cache.extended_efforts);
+    if !extended && (levels.contains(&"minimal") || levels.contains(&"xhigh")) {
+        &["low", "medium", "high"]
+    } else {
+        levels
+    }
+}
 
 pub(crate) fn cached_models(client: &Client) -> Option<Vec<Model>> {
     CATALOG
@@ -77,6 +92,9 @@ pub async fn refresh_models(client: &Client) -> Result<Vec<Model>, String> {
     let usage = client.request(reqwest::Method::GET, "/v1/billing/usage", &());
     let (catalog, usage) = tokio::try_join!(catalog, usage).map_err(|e| e.to_string())?;
     let catalog: Value = catalog.json().await.map_err(|e| e.to_string())?;
+    let extended_efforts = catalog["supports_extended_reasoning_effort"]
+        .as_bool()
+        .unwrap_or(false);
     let usage: Value = usage.json().await.map_err(|e| e.to_string())?;
     let models = eligible_models(
         catalog,
@@ -86,6 +104,7 @@ pub async fn refresh_models(client: &Client) -> Result<Vec<Model>, String> {
         owner: client.clone(),
         models: models.clone(),
         fetched_at: std::time::Instant::now(),
+        extended_efforts,
     });
     Ok(models)
 }
@@ -187,7 +206,7 @@ mod tests {
                 );
                 let path = request.split_whitespace().nth(1).unwrap().to_owned();
                 let body = if path == "/v1/catalog" {
-                    serde_json::json!({"models":[
+                    serde_json::json!({"supports_extended_reasoning_effort": paths.len() >= 2, "models":[
                         {"id":"fast","name":"Fast","multiplier":1,"plus_only":false},
                         {"id":"advanced","name":"Advanced","multiplier":5,"plus_only":true}
                     ]})
@@ -224,10 +243,20 @@ mod tests {
             .unwrap();
         assert_eq!(initial.len(), 2);
         assert_eq!(initial[1].id, "advanced");
+        assert_eq!(
+            reasoning_efforts(&client, "gemini-3.5-flash-lite")[0],
+            "low"
+        );
+        assert!(!reasoning_efforts(&client, "gemini-4-hydrogen").contains(&"xhigh"));
         // Reopening does not consume the next network responses. Refresh must
         // recheck plan eligibility and replace the cached Plus-only choices.
         assert_eq!(models(&client).await.unwrap().len(), 2);
         assert_eq!(refresh_models(&client).await.unwrap().len(), 1);
+        assert_eq!(
+            reasoning_efforts(&client, "gemini-3.5-flash-lite")[0],
+            "minimal"
+        );
+        assert!(reasoning_efforts(&client, "gemini-4-hydrogen").contains(&"xhigh"));
         assert_eq!(models(&client).await.unwrap().len(), 1);
         assert_eq!(
             server.await.unwrap(),
@@ -244,6 +273,7 @@ mod tests {
             owner: client.clone(),
             models: initial,
             fetched_at: std::time::Instant::now(),
+            extended_efforts: false,
         };
         assert!(cache.valid_for(&client));
         assert!(!cache.valid_for(&another_session));

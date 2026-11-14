@@ -7610,6 +7610,10 @@ mod tests {
                     let body: serde_json::Value =
                         serde_json::from_slice(&bytes[end..end + length]).unwrap();
                     assert_eq!(body["model"], "gemini-3.5-flash-lite");
+                    assert_eq!(
+                        body["reasoning_effort"], "low",
+                        "old servers do not accept minimal"
+                    );
                     use base64::Engine;
                     let image = body["messages"][0]["content"][1]["image_url"]["url"]
                         .as_str()

@@ -64,7 +64,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/{provider}/start",post(auth::start)).route("/auth/{provider}/callback",get(auth::callback))
         .route("/auth/exchange",post(auth::exchange)).route("/auth/refresh",post(auth::refresh))
         .route("/billing/webhook",post(billing::webhook))
-        .route("/catalog",get(||async{Json(json!({"plans":[plans::STANDARD,plans::PLUS],"models":plans::models(),"api_version":1}))}));
+        .route("/catalog",get(||async{Json(json!({"plans":[plans::STANDARD,plans::PLUS],"models":plans::models(),"api_version":1,"supports_extended_reasoning_effort":true}))}));
     Router::new().nest("/v1",api)
         .route("/health/live",get(||async{StatusCode::NO_CONTENT})).route("/health/ready",get(ready))
         .layer(DefaultBodyLimit::max(4*1024*1024))

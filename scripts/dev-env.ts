@@ -32,8 +32,8 @@ export function developmentEnv(appDirectory, rootDirectory, inherited = process.
     ...local,
     NODE_ENV: "development",
   };
-  // Neon pulls production connections into .env.local. Development must use
-  // its own database/cache, including the direct URL used by migrations.
+  // Keep development on its own database and cache, including the direct URL
+  // used by migrations, even when production connections are in .env.local.
   for (const key of [
     "WEBSITE_URL",
     "API_PUBLIC_URL",

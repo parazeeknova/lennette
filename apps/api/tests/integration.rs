@@ -1,5 +1,5 @@
 //! Run with: cargo test -p lennette-server --test integration -- --ignored
-//! Uses real PostgreSQL 18 + Redis from infra/compose.yaml, mock billable providers.
+//! Uses real PostgreSQL 19 + Redis from infra/compose.yaml, mock billable providers.
 use axum::{
     Router,
     body::Body,

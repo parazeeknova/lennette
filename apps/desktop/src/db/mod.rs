@@ -44,7 +44,10 @@ pub struct Database {
 impl Database {
     /// Open or create a database at `path`, applying the schema idempotently.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let connection = encryption::open(path.as_ref())?;
+        let path = path.as_ref();
+        // Keep concurrent opens out until WAL mode and the schema are ready.
+        let _lock = encryption::lock_open(path)?;
+        let connection = encryption::open(path)?;
         Self::prepare(connection)
     }
 

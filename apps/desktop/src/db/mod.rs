@@ -97,7 +97,16 @@ mod tests {
     fn seed_prompts_exist_once() {
         let db = Database::in_memory().unwrap();
         let prompts = repos::settings::prompts(db.connection()).unwrap();
-        assert_eq!(prompts.len(), 5);
+        assert_eq!(prompts.len(), schema::seed::DEFAULT_LISTEN_MODES.len());
+        for mode in schema::seed::DEFAULT_LISTEN_MODES {
+            assert_eq!(
+                prompts
+                    .iter()
+                    .filter(|prompt| prompt.listen_slot == Some(mode.slot))
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

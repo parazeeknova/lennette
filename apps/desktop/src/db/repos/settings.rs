@@ -68,7 +68,7 @@ pub fn prompts(connection: &Connection) -> Result<Vec<PromptRecord>> {
     rows.collect::<std::result::Result<_, _>>()
 }
 
-/// The five listen-mode prompts, in tab order.
+/// The listen-mode prompts, in tab order.
 pub fn listen_modes(connection: &Connection) -> Result<Vec<PromptRecord>> {
     prompts(connection)
 }

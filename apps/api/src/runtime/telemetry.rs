@@ -228,6 +228,15 @@ pub async fn context(
     .await
 }
 
+/// Poll a response stream under its originating span after the handler returns.
+pub(crate) fn instrument_stream<S: futures_util::Stream>(
+    stream: S,
+    span: tracing::Span,
+) -> impl futures_util::Stream<Item = S::Item> {
+    let mut stream = Box::pin(stream);
+    futures_util::stream::poll_fn(move |cx| span.in_scope(|| stream.as_mut().poll_next(cx)))
+}
+
 fn http_metrics() -> &'static (
     opentelemetry::metrics::Counter<u64>,
     opentelemetry::metrics::Histogram<f64>,
@@ -282,8 +291,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_failures_log_the_route_template_and_safe_reason() {
-        use axum::{Router, body::Body, http::Request, routing::get};
+    async fn request_and_stream_failures_keep_safe_fields_and_trace_context() {
+        use axum::{
+            Router,
+            body::Body,
+            http::Request,
+            response::sse::{Event, Sse},
+            routing::get,
+        };
+        use http_body_util::BodyExt;
         use tower::ServiceExt;
         use tracing::instrument::WithSubscriber;
 
@@ -321,11 +337,19 @@ mod tests {
                 "/unavailable",
                 get(|| async { crate::error::ApiError::StorageUnavailable }),
             )
+            .route("/events", get(|| async {
+                let stream = async_stream::stream! {
+                    yield Ok::<_, std::convert::Infallible>(Event::default().data("connected"));
+                    tracing::warn!(event = "test.stream.failed", "Stream failed after the first event");
+                };
+                Sse::new(instrument_stream(stream, tracing::Span::current()))
+            }))
             .layer(axum::middleware::from_fn(context));
         for (path, status) in [
             ("/good", 204),
             ("/example/private-id?token=private-token", 500),
             ("/unavailable", 503),
+            ("/events", 200),
         ] {
             let response = app
                 .clone()
@@ -343,6 +367,19 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status().as_u16(), status);
+            if path == "/events" {
+                assert!(
+                    !String::from_utf8_lossy(&output.lock().unwrap())
+                        .contains("test.stream.failed")
+                );
+                let body = response
+                    .into_body()
+                    .collect()
+                    .with_subscriber(dispatch.clone())
+                    .await
+                    .unwrap();
+                assert_eq!(body.to_bytes(), "data: connected\n\n");
+            }
         }
         let output = String::from_utf8(output.lock().unwrap().clone()).unwrap();
         let logs: Vec<serde_json::Value> = output
@@ -350,7 +387,7 @@ mod tests {
             .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
             .filter(|log| log["fields"]["event"].is_string())
             .collect();
-        assert_eq!(logs.len(), 2, "{output}");
+        assert_eq!(logs.len(), 3, "{output}");
         assert_eq!(logs[0]["fields"]["event"], "http.request.failed");
         assert_eq!(logs[0]["fields"]["path"], "/example/{id}");
         assert_eq!(logs[0]["fields"]["reason"], "internal_error");
@@ -359,6 +396,7 @@ mod tests {
             "http.request.dependency_unavailable"
         );
         assert_eq!(logs[1]["fields"]["reason"], "storage_unavailable");
+        assert_eq!(logs[2]["fields"]["event"], "test.stream.failed");
         assert!(!output.contains("private"));
         let exported = capture.0.lock().unwrap();
         let request_logs = exported
@@ -369,7 +407,7 @@ mod tests {
                     .any(|(key, _)| key.as_str() == "event")
             })
             .collect::<Vec<_>>();
-        assert_eq!(request_logs.len(), 2);
+        assert_eq!(request_logs.len(), 3);
         for record in request_logs {
             let context = record.trace_context().unwrap();
             assert_eq!(

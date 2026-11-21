@@ -15,12 +15,14 @@ use axum::{
 use fred::prelude::*;
 use secrecy::ExposeSecret;
 use std::{convert::Infallible, time::Duration};
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 struct StreamLease {
     redis: Client,
     key: String,
     token: String,
+    span: Span,
 }
 impl Drop for StreamLease {
     fn drop(&mut self) {
@@ -29,15 +31,18 @@ impl Drop for StreamLease {
         let token = self.token.clone();
         // Response bodies are dropped on navigation/disconnect, without polling
         // the generator to completion. Release capacity on that path too.
-        tokio::spawn(async move {
-            if redis.zrem::<i64, _, _>(key, token).await.is_err() {
-                tracing::warn!(
-                    event = "account.events.lease_release_failed",
-                    dependency = "redis",
-                    "Account event stream lease will expire automatically"
-                );
+        tokio::spawn(
+            async move {
+                if redis.zrem::<i64, _, _>(key, token).await.is_err() {
+                    tracing::warn!(
+                        event = "account.events.lease_release_failed",
+                        dependency = "redis",
+                        "Account event stream lease will expire automatically"
+                    );
+                }
             }
-        });
+            .instrument(self.span.clone()),
+        );
     }
 }
 
@@ -89,10 +94,12 @@ pub async fn stream(
     if acquired == 0 {
         return Err(ApiError::RateLimited);
     }
+    let span = Span::current();
     let guard = StreamLease {
         redis: state.redis.clone(),
         key: key.clone(),
         token: lease.clone(),
+        span: span.clone(),
     };
     let mut receiver = state.events.subscribe();
     let stream = async_stream::stream! {
@@ -130,5 +137,6 @@ pub async fn stream(
             }
         }
     };
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default().interval(Duration::from_secs(10))))
+    Ok(Sse::new(crate::telemetry::instrument_stream(stream, span))
+        .keep_alive(KeepAlive::default().interval(Duration::from_secs(10))))
 }

@@ -44,6 +44,7 @@ struct ContinuationCleanup {
     account_id: Uuid,
     actual: i64,
     armed: bool,
+    span: tracing::Span,
 }
 impl Drop for ContinuationCleanup {
     fn drop(&mut self) {
@@ -65,7 +66,7 @@ impl Drop for ContinuationCleanup {
                         tracing::error!(event = "ai.chat.settlement_failed", account_id = %account_id, reservation_id = %reservation, reason = error.diagnostic_code(), "Cancelled continuation settlement failed");
                     }
                 }
-            }.in_current_span());
+            }.instrument(self.span.clone()));
         }
     }
 }
@@ -187,6 +188,7 @@ async fn open_continuation(
                     account_id: principal.account_id,
                     actual: attempt.reserved,
                     armed: true,
+                    span: tracing::Span::current(),
                 });
             }
             Ok(attempt)
@@ -371,7 +373,7 @@ pub async fn chat(
                     yield Ok(sse(event));
                 }
             };
-            let failure = failure.or_else(|| (output.len() == output_start || output.trim().is_empty()).then_some("empty_answer"));
+            let failure = failure.or_else(|| output[output_start..].trim().is_empty().then_some("empty_answer"));
             if let Some(reason) = failure.filter(|reason| *reason != "shutdown") {
                 tracing::warn!(event = "ai.chat.stream_attempt_failed", account_id = %p.account_id, %stream_id, provider = model.provider.name(), model = model.id, reason, "Managed chat stream attempt failed");
             }
@@ -408,11 +410,7 @@ pub async fn chat(
             yield Ok(sse(json!({"error":{"message":"AI providers could not finish this answer. Check your remaining allowance or try again shortly."}})));
         }
     };
-    let mut stream = Box::pin(stream);
-    let stream = futures_util::stream::poll_fn(move |cx| {
-        use futures_util::Stream;
-        span.in_scope(|| stream.as_mut().poll_next(cx))
-    });
+    let stream = crate::telemetry::instrument_stream(stream, span);
     Ok((
         [
             (header::CONTENT_TYPE, "text/event-stream"),

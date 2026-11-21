@@ -67,7 +67,7 @@ function expectHeader(value) {
   assert.equal(Buffer.from(encoded, "base64").toString(), "test@example.test:local-test-only");
 }
 
-test("Neon production env pulls cannot redirect development traffic or migrations", () => {
+test("production env values cannot redirect development traffic or migrations", () => {
   const directory = mkdtempSync(join(tmpdir(), "lennette-database-env-"));
   try {
     mkdirSync(join(directory, "api"));

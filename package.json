@@ -23,7 +23,6 @@
     "db:migrate": "bun run --cwd apps/api migrate"
   },
   "devDependencies": {
-    "@neon/config": "^1.10.1",
     "cross-env": "^10.1.0",
     "lerna": "^10.1.1"
   },

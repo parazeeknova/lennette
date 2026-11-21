@@ -234,7 +234,11 @@ mod tests {
         let PageData::Prompts(prompts) = dashboard.data() else {
             panic!("expected prompts");
         };
-        assert_eq!(prompts.len(), 5);
+        let expected = crate::db::schema::seed::DEFAULT_LISTEN_MODES;
+        assert_eq!(prompts.len(), expected.len());
+        assert!(prompts.iter().zip(expected).all(
+            |(prompt, mode)| prompt.name == mode.name && prompt.listen_slot == Some(mode.slot)
+        ));
     }
 
     #[test]

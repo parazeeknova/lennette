@@ -55,8 +55,11 @@ fn unlock(path: &Path, key: &str) -> Result<Connection> {
     Ok(connection)
 }
 
+pub(super) fn lock_open(path: &Path) -> Result<fs::File> {
+    Ok(files::lock(&sidecar(path, ".open.lock"))?)
+}
+
 pub(super) fn open(path: &Path) -> Result<Connection> {
-    let _lock = files::lock(&sidecar(path, ".open.lock"))?;
     let exists = path.try_exists()?;
     let mut header = [0u8; 16];
     let file = files::open_private(path, false)?;

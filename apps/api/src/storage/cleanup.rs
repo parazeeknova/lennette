@@ -168,7 +168,9 @@ pub fn start(state: AppState) {
             tokio::select! {
                 _ = state.shutdown.cancelled() => break,
                 _ = interval.tick() => {
-                    if reconcile(&state).await.is_err() { tracing::warn!("object cleanup failed; retrying on next sweep"); }
+                    if let Err(error) = reconcile(&state).await {
+                        tracing::warn!(event = "storage.cleanup.sweep_failed", reason = error.diagnostic_code(), "Object cleanup failed; retrying on next sweep");
+                    }
                 }
             }
         }

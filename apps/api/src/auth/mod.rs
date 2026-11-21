@@ -631,7 +631,11 @@ pub async fn guard(
     mut request: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response> {
-    let path = request.uri().path().to_owned();
+    let path = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map_or("unmatched", axum::extract::MatchedPath::as_str)
+        .to_owned();
     let token = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -715,7 +719,7 @@ pub async fn guard(
     let method = request.method().clone();
     let started = std::time::Instant::now();
     request.extensions_mut().insert(principal.clone());
-    let response = next.run(request).await;
+    let mut response = next.run(request).await;
     activity::protected_outcome(
         method.as_str(),
         &path,
@@ -725,6 +729,9 @@ pub async fn guard(
         principal.session_id,
         started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
     );
+    if response.status().is_server_error() {
+        response.extensions_mut().insert(principal);
+    }
     Ok(response)
 }
 pub async fn logout(

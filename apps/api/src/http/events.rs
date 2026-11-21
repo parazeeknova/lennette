@@ -15,12 +15,14 @@ use axum::{
 use fred::prelude::*;
 use secrecy::ExposeSecret;
 use std::{convert::Infallible, time::Duration};
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 struct StreamLease {
     redis: Client,
     key: String,
     token: String,
+    span: Span,
 }
 impl Drop for StreamLease {
     fn drop(&mut self) {
@@ -29,9 +31,18 @@ impl Drop for StreamLease {
         let token = self.token.clone();
         // Response bodies are dropped on navigation/disconnect, without polling
         // the generator to completion. Release capacity on that path too.
-        tokio::spawn(async move {
-            let _: std::result::Result<i64, _> = redis.zrem(key, token).await;
-        });
+        tokio::spawn(
+            async move {
+                if redis.zrem::<i64, _, _>(key, token).await.is_err() {
+                    tracing::warn!(
+                        event = "account.events.lease_release_failed",
+                        dependency = "redis",
+                        "Account event stream lease will expire automatically"
+                    );
+                }
+            }
+            .instrument(self.span.clone()),
+        );
     }
 }
 
@@ -59,7 +70,11 @@ pub fn start(state: AppState) {
                 break;
             }
             if result.is_err() {
-                tracing::warn!("account event listener disconnected; reconnecting");
+                tracing::warn!(
+                    event = "account.events.listener_failed",
+                    dependency = "database",
+                    "Account event listener disconnected; reconnecting"
+                );
             }
             tokio::select! { _ = state.shutdown.cancelled() => break, _ = tokio::time::sleep(Duration::from_secs(2)) => {} }
         }
@@ -79,10 +94,12 @@ pub async fn stream(
     if acquired == 0 {
         return Err(ApiError::RateLimited);
     }
+    let span = Span::current();
     let guard = StreamLease {
         redis: state.redis.clone(),
         key: key.clone(),
         token: lease.clone(),
+        span: span.clone(),
     };
     let mut receiver = state.events.subscribe();
     let stream = async_stream::stream! {
@@ -93,11 +110,21 @@ pub async fn stream(
             tokio::select! {
                 _ = state.shutdown.cancelled() => break,
                 _ = timer.tick() => {
-                    if auth::browser::authenticate_cookie(&state,&headers,false).await.is_err() {
+                    if let Err(error) = auth::browser::authenticate_cookie(&state,&headers,false).await {
+                        if !matches!(error, ApiError::Unauthorized) {
+                            tracing::warn!(event = "account.events.auth_refresh_failed", session_id = %p.session_id, reason = error.diagnostic_code(), "Cannot revalidate account event stream session");
+                        }
                         yield Ok(Event::default().event("expired").data("sign_in_required")); break;
                     }
                     let renewed: std::result::Result<i64,_> = state.redis.eval("if redis.call('ZSCORE',KEYS[1],ARGV[1]) then redis.call('ZADD',KEYS[1],ARGV[2],ARGV[1]); redis.call('EXPIRE',KEYS[1],45); return 1 else return 0 end",vec![key.clone()],vec![lease.clone(),(chrono::Utc::now().timestamp()+45).to_string()]).await;
-                    if !matches!(renewed,Ok(1)) { break; }
+                    match renewed {
+                        Ok(1) => {}
+                        Ok(_) => break,
+                        Err(_) => {
+                            tracing::warn!(event = "account.events.lease_renewal_failed", session_id = %p.session_id, dependency = "redis", "Could not renew account event stream lease");
+                            break;
+                        }
+                    }
                 }
                 event = receiver.recv() => {
                     match event {
@@ -110,5 +137,6 @@ pub async fn stream(
             }
         }
     };
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default().interval(Duration::from_secs(10))))
+    Ok(Sse::new(crate::telemetry::instrument_stream(stream, span))
+        .keep_alive(KeepAlive::default().interval(Duration::from_secs(10))))
 }

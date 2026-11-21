@@ -3989,10 +3989,17 @@ impl Overlay {
                 .id(("chat-row", index))
                 .w_full()
                 .min_w(px(0.0))
-                .py(px(if matches!(&rows[index], ChatRow::Code { .. }) {
-                    0.0
-                } else {
-                    4.0
+                .py(px(match &rows[index] {
+                    ChatRow::Code { .. } => 0.0,
+                    ChatRow::Markdown { document, block }
+                        if matches!(
+                            document[*block],
+                            crate::ui::markdown::Block::ListItem { .. }
+                        ) =>
+                    {
+                        1.5
+                    }
+                    _ => 4.0,
                 }))
                 // Same measure as the transcript above, centred in the panel.
                 .child(
@@ -5720,18 +5727,44 @@ fn render_markdown_blocks(
         .into_any_element()
     }
 
+    let list_row = |marker: String, spans: &[Span], depth: usize| {
+        div()
+            .flex()
+            .items_start()
+            .w_full()
+            .min_w(px(0.0))
+            .pl(scaled(depth as f32 * 12.0))
+            .gap(scaled(4.0))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .flex_shrink_0()
+                    .min_w(scaled(24.0))
+                    .text_size(scaled(11.0))
+                    .text_color(theme.muted_foreground)
+                    .child(marker),
+            )
+            .child(div().flex_1().min_w(px(0.0)).child(inline_text(
+                theme,
+                surfaces,
+                spans,
+                FontWeight::NORMAL,
+            )))
+    };
+
     let mut column = div()
         .flex()
         .flex_col()
         .flex_shrink_0()
         .w_full()
         .min_w(px(0.0))
-        .gap(px(6.0))
         .max_w(px(640.0))
-        .text_size(scaled(12.5));
+        .text_size(scaled(12.5))
+        .line_height(scaled(17.0));
 
     for (block_index, block) in blocks.iter().cloned().enumerate() {
-        let element: gpui::AnyElement = match block {
+        let element = match block {
             Block::Heading { level, spans } => div()
                 .w_full()
                 .min_w(px(0.0))
@@ -5746,10 +5779,6 @@ fn render_markdown_blocks(
                 .child(inline_text(theme, surfaces, &spans, FontWeight::SEMIBOLD))
                 .into_any_element(),
             Block::Paragraph { spans } => {
-                // Breath-friendly prose: each sentence gets its own numbered
-                // line so a long paragraph stays scannable mid-meeting.
-                // Single-sentence replies keep normal paragraph styling.
-                // Streaming-safe: partial tails stay in the last breath group.
                 let breaths = crate::ui::markdown::split_breath_groups(&spans);
                 if breaths.len() <= 1 {
                     div()
@@ -5758,33 +5787,16 @@ fn render_markdown_blocks(
                         .child(inline_text(theme, surfaces, &spans, FontWeight::NORMAL))
                         .into_any_element()
                 } else {
-                    let mut list = div().flex().flex_col().w_full().min_w(px(0.0)).gap(px(5.0));
-                    for (breath_index, breath) in breaths.into_iter().enumerate() {
-                        list = list.child(
-                            div()
-                                .flex()
-                                .w_full()
-                                .min_w(px(0.0))
-                                .gap(px(8.0))
-                                .items_start()
-                                .child(
-                                    div()
-                                        .flex_shrink_0()
-                                        .w(px(22.0))
-                                        .text_size(scaled(10.5))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(theme.muted_foreground)
-                                        .child(format!("{}", breath_index + 1)),
-                                )
-                                .child(div().flex_1().min_w(px(0.0)).child(inline_text(
-                                    theme,
-                                    surfaces,
-                                    &breath,
-                                    FontWeight::NORMAL,
-                                ))),
-                        );
-                    }
-                    list.into_any_element()
+                    let rows = breaths
+                        .iter()
+                        .enumerate()
+                        .map(|(index, breath)| list_row(format!("{}.", index + 1), breath, 0));
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(scaled(3.0))
+                        .children(rows)
+                        .into_any_element()
                 }
             }
             Block::Quote { spans } => div()
@@ -5800,25 +5812,7 @@ fn render_markdown_blocks(
                 spans,
                 depth,
                 ..
-            } => div()
-                .flex()
-                .w_full()
-                .min_w(px(0.0))
-                .gap(px(6.0))
-                .pl(px(4.0 + depth as f32 * 12.0))
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .text_color(theme.muted_foreground)
-                        .child(marker),
-                )
-                .child(div().flex_1().min_w(px(0.0)).child(inline_text(
-                    theme,
-                    surfaces,
-                    &spans,
-                    FontWeight::NORMAL,
-                )))
-                .into_any_element(),
+            } => list_row(marker, &spans, depth).into_any_element(),
             Block::Code { language, text } => {
                 let light = theme.background.r > 0.5;
                 let tokens =
@@ -5941,12 +5935,18 @@ fn render_markdown_blocks(
                 .bg(theme.border)
                 .into_any_element(),
         };
+        let spacing = match (blocks.get(block_index), blocks.get(block_index + 1)) {
+            (_, None) => 0.0,
+            (Some(Block::ListItem { .. }), Some(Block::ListItem { .. })) => 3.0,
+            _ => 6.0,
+        };
         column = column.child(
             div()
                 .id(("markdown-block", block_index))
                 .w_full()
                 .min_w(px(0.0))
                 .flex_shrink_0()
+                .mb(scaled(spacing))
                 .child(element),
         );
     }

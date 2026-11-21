@@ -45,6 +45,29 @@ impl From<reqwest::Error> for ApiError {
         Self::Internal(e.without_url().into())
     }
 }
+
+#[derive(Clone, Copy)]
+pub(crate) struct FailureCode(pub &'static str);
+
+impl ApiError {
+    pub(crate) fn diagnostic_code(&self) -> &'static str {
+        match self {
+            Self::PaymentRequired => "quota_or_subscription",
+            Self::RateLimited => "rate_limited",
+            Self::Unavailable => "not_configured",
+            Self::StorageUnavailable => "storage_unavailable",
+            Self::ScannerUnavailable => "scanner_unavailable",
+            Self::Internal(error) if error.is::<sea_orm::DbErr>() || error.is::<sqlx::Error>() => {
+                "database"
+            }
+            Self::Internal(error) if error.is::<fred::error::Error>() => "redis",
+            Self::Internal(error) if error.is::<reqwest::Error>() => "upstream_http",
+            Self::Internal(_) => "internal_error",
+            _ => "request_rejected",
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
@@ -58,10 +81,7 @@ impl IntoResponse for ApiError {
             Self::StorageUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "storage_unavailable"),
             Self::UnsafeAttachment => (StatusCode::UNPROCESSABLE_ENTITY, "unsafe_attachment"),
             Self::ScannerUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "scanner_unavailable"),
-            Self::Internal(error) => {
-                tracing::error!(error = %error, "request failed");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
-            }
+            Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
         let message = if matches!(self, Self::Internal(_)) {
             "request failed".to_owned()
@@ -78,6 +98,11 @@ impl IntoResponse for ApiError {
             Json(json!({"error":{"code":code,"message":message}})),
         )
             .into_response();
+        if status.is_server_error() {
+            response
+                .extensions_mut()
+                .insert(FailureCode(self.diagnostic_code()));
+        }
         if let Some(seconds) = retry_after {
             response.headers_mut().insert(
                 axum::http::header::RETRY_AFTER,

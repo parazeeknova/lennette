@@ -44,6 +44,7 @@ struct ContinuationCleanup {
     account_id: Uuid,
     actual: i64,
     armed: bool,
+    span: tracing::Span,
 }
 impl Drop for ContinuationCleanup {
     fn drop(&mut self) {
@@ -62,10 +63,10 @@ impl Drop for ContinuationCleanup {
                         activity::chat_settlement_recovered(account_id, reservation);
                     }
                     Err(error) => {
-                        tracing::error!(reservation=%reservation,%error, "Cancelled continuation settlement failed");
+                        tracing::error!(event = "ai.chat.settlement_failed", account_id = %account_id, reservation_id = %reservation, reason = error.diagnostic_code(), "Cancelled continuation settlement failed");
                     }
                 }
-            });
+            }.instrument(self.span.clone()));
         }
     }
 }
@@ -132,18 +133,27 @@ async fn open(
             server.address = url.host_str().unwrap_or("")
         ))
         .await;
-    if let Ok(Ok(response)) = response
-        && response.status().is_success()
-    {
-        return Ok(Some(Attempt {
-            model,
-            reservation,
-            reserved,
-            response,
-            cleanup: None,
-        }));
-    }
-    activity::chat_upstream_failed(principal.account_id, model.provider.name(), model.id);
+    let (reason, status) = match response {
+        Ok(Ok(response)) if response.status().is_success() => {
+            return Ok(Some(Attempt {
+                model,
+                reservation,
+                reserved,
+                response,
+                cleanup: None,
+            }));
+        }
+        Ok(Ok(response)) => ("http_status", Some(response.status().as_u16())),
+        Ok(Err(_)) => ("transport_error", None),
+        Err(_) => ("headers_timeout", None),
+    };
+    activity::chat_upstream_failed(
+        principal.account_id,
+        model.provider.name(),
+        model.id,
+        reason,
+        status,
+    );
     billing::settle(state, reservation, 0).await?;
     Ok(None)
 }
@@ -165,22 +175,26 @@ async fn open_continuation(
     );
     // Dropping a reserve future can race its transaction commit. Let this task
     // finish acquiring the ID; an abandoned task result then drops its cleanup.
-    tokio::spawn(async move {
-        let mut attempt = open(
-            &state, &principal, model, &messages, input, max_tokens, &effort,
-        )
-        .await?;
-        if let Some(attempt) = &mut attempt {
-            attempt.cleanup = Some(ContinuationCleanup {
-                state,
-                reservation: attempt.reservation,
-                account_id: principal.account_id,
-                actual: attempt.reserved,
-                armed: true,
-            });
+    tokio::spawn(
+        async move {
+            let mut attempt = open(
+                &state, &principal, model, &messages, input, max_tokens, &effort,
+            )
+            .await?;
+            if let Some(attempt) = &mut attempt {
+                attempt.cleanup = Some(ContinuationCleanup {
+                    state,
+                    reservation: attempt.reservation,
+                    account_id: principal.account_id,
+                    actual: attempt.reserved,
+                    armed: true,
+                    span: tracing::Span::current(),
+                });
+            }
+            Ok(attempt)
         }
-        Ok(attempt)
-    })
+        .in_current_span(),
+    )
     .await
     .map_err(|_| ApiError::Unavailable)?
 }
@@ -301,8 +315,9 @@ pub async fn chat(
         .take(4000)
         .collect::<String>();
     let effort = effort.to_owned();
+    let stream_id = Uuid::new_v4();
+    let span = tracing::info_span!("managed.chat.stream", %stream_id);
     let stream = async_stream::stream! {
-        let stream_id = Uuid::new_v4();
         let mut output = String::new();
         let mut billed_total = 0i64;
         let mut last_model = selected;
@@ -323,54 +338,63 @@ pub async fn chat(
             let output_start = output.len();
             let mut pending = Vec::new();
             let mut usage = None;
-            let mut done = false;
-            let mut failed = false;
             let mut progress = Progress::new(tokio::time::Instant::now());
-            loop {
+            let failure = 'upstream: loop {
                 let next = tokio::select! {
                     next = tokio::time::timeout_at(progress.deadline(), upstream.next()) => next,
-                    _ = state.shutdown.cancelled() => { failed=true; break; }
+                    _ = state.shutdown.cancelled() => break Some("shutdown"),
                 };
-                let chunk = match next { Ok(Some(Ok(chunk))) => chunk, _ => { failed=true; break; } };
+                let chunk = match next {
+                    Ok(Some(Ok(chunk))) => chunk,
+                    Ok(Some(Err(_))) => break Some("transport_error"),
+                    Ok(None) => break Some("unexpected_eof"),
+                    Err(_) => break Some("progress_timeout"),
+                };
                 pending.extend_from_slice(&chunk);
-                if pending.len()>512*1024 { failed=true; break; }
+                if pending.len()>512*1024 { break Some("event_buffer_limit"); }
                 while let Some(end) = pending.iter().position(|b|*b==b'\n') {
                     let line: Vec<_> = pending.drain(..=end).collect();
-                    let Ok(text) = std::str::from_utf8(&line) else { failed=true; break; };
+                    let Ok(text) = std::str::from_utf8(&line) else { break 'upstream Some("invalid_utf8"); };
                     let Some(data) = text.trim().strip_prefix("data:").map(str::trim) else { continue; };
-                    if data=="[DONE]" { done=true; break; }
-                    let event: Value = match serde_json::from_str(data) { Ok(v)=>v, Err(_)=>{failed=true;break;} };
-                    if event.get("error").is_some() {failed=true;break;}
+                    if data=="[DONE]" { break 'upstream None; }
+                    let Ok(event) = serde_json::from_str::<Value>(data) else { break 'upstream Some("invalid_event_json"); };
+                    if event.get("error").is_some() { break 'upstream Some("provider_error"); }
                     if let Some(cost)=usage_cost(model,&event["usage"]) {
                         usage=Some(cost);
                         if let Some(cleanup)=&mut attempt.cleanup {cleanup.actual=cost;}
                     }
                     progress.observe(&event["choices"][0]["delta"], tokio::time::Instant::now());
                     if let Some(delta)=event["choices"][0]["delta"]["content"].as_str() && !delta.is_empty() {
-                        if output.len()+delta.len()>1024*1024 {failed=true;break;}
+                        if output.len()+delta.len()>1024*1024 { break 'upstream Some("output_limit"); }
                         let offset=output.len();
                         output.push_str(delta);
                         if relay {live(&state,&p,request.meeting_id,json!({"type":"ai_delta","stream_id":stream_id,"conversation_id":request.conversation_id,"offset":offset,"delta":delta})).await;}
                     }
                     yield Ok(sse(event));
                 }
-                if done || failed {break;}
+            };
+            let failure = failure.or_else(|| output[output_start..].trim().is_empty().then_some("empty_answer"));
+            if let Some(reason) = failure.filter(|reason| *reason != "shutdown") {
+                tracing::warn!(event = "ai.chat.stream_attempt_failed", account_id = %p.account_id, %stream_id, provider = model.provider.name(), model = model.id, reason, "Managed chat stream attempt failed");
             }
             // Missing usage after an accepted request is an unknown billable
             // outcome, so keep its reserved amount instead of granting free AI.
             let billed = usage.unwrap_or(attempt.reserved);
-            match billing::settle(&state,attempt.reservation,billed).await {
-                Ok(()) => { billed_total+=billed; if let Some(cleanup)=&mut attempt.cleanup {cleanup.armed=false;} },
-                Err(error) => {tracing::error!(account_id=%p.account_id,%error,"AI usage settlement failed");failed=true;}
-            }
-            if done && !failed && output.len()>output_start && !output.trim().is_empty() {complete=true;break;}
+            let settled = match billing::settle(&state,attempt.reservation,billed).await {
+                Ok(()) => { billed_total+=billed; if let Some(cleanup)=&mut attempt.cleanup {cleanup.armed=false;} true },
+                Err(error) => {
+                    tracing::error!(event = "ai.chat.settlement_failed", account_id = %p.account_id, %stream_id, reservation_id = %attempt.reservation, reason = error.diagnostic_code(), "AI usage settlement failed");
+                    false
+                }
+            };
+            if failure.is_none() && settled {complete=true;break;}
             if state.shutdown.is_cancelled() || output.len()>64*1024 {break;}
             if let Some(model)=backup.take() {
                 let continued=continuation(&messages,&output);
                 let continued_input=input.saturating_add(output.len() as i64).saturating_add(256);
                 match open_continuation(&state,&p,model,&continued,continued_input,max_tokens,&effort).await {
                     Ok(attempt)=>current=attempt,
-                    Err(_)=>current=None,
+                    Err(error) => tracing::warn!(event = "ai.chat.continuation_failed", account_id = %p.account_id, %stream_id, provider = model.provider.name(), model = model.id, reason = error.diagnostic_code(), "Managed chat continuation failed"),
                 }
                 switched=true;
             }
@@ -380,9 +404,13 @@ pub async fn chat(
         if complete {
             yield Ok(Bytes::from_static(b"data: [DONE]\n\n"));
         } else {
+            if !state.shutdown.is_cancelled() {
+                tracing::warn!(event = "ai.chat.incomplete", account_id = %p.account_id, %stream_id, provider = last_model.provider.name(), model = last_model.id, output_bytes = output.len(), switched, "Managed chat returned an incomplete answer");
+            }
             yield Ok(sse(json!({"error":{"message":"AI providers could not finish this answer. Check your remaining allowance or try again shortly."}})));
         }
     };
+    let stream = crate::telemetry::instrument_stream(stream, span);
     Ok((
         [
             (header::CONTENT_TYPE, "text/event-stream"),

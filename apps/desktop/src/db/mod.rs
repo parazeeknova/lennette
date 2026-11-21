@@ -44,7 +44,10 @@ pub struct Database {
 impl Database {
     /// Open or create a database at `path`, applying the schema idempotently.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let connection = encryption::open(path.as_ref())?;
+        let path = path.as_ref();
+        // Keep concurrent opens out until WAL mode and the schema are ready.
+        let _lock = encryption::lock_open(path)?;
+        let connection = encryption::open(path)?;
         Self::prepare(connection)
     }
 
@@ -97,7 +100,16 @@ mod tests {
     fn seed_prompts_exist_once() {
         let db = Database::in_memory().unwrap();
         let prompts = repos::settings::prompts(db.connection()).unwrap();
-        assert_eq!(prompts.len(), 5);
+        assert_eq!(prompts.len(), schema::seed::DEFAULT_LISTEN_MODES.len());
+        for mode in schema::seed::DEFAULT_LISTEN_MODES {
+            assert_eq!(
+                prompts
+                    .iter()
+                    .filter(|prompt| prompt.listen_slot == Some(mode.slot))
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]

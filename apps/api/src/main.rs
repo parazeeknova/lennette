@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run() -> anyhow::Result<()> {
-    let config = Config::from_env()?;
+    let config = Config::from_env().inspect_err(|_| service_failed("configuration"))?;
     let migrate_only = std::env::args().any(|s| s == "migrate");
     // A single production replica migrates before it becomes ready. A separate
     // release job can still use `migrate` without needing Redis to be available.
@@ -35,7 +35,9 @@ async fn run() -> anyhow::Result<()> {
             .min_connections(1)
             .connect_timeout(std::time::Duration::from_secs(30))
             .sqlx_logging(false);
-        let db = sea_orm::Database::connect(options).await?;
+        let db = sea_orm::Database::connect(options)
+            .await
+            .inspect_err(|_| service_failed("migration_connect"))?;
         let result = async {
             // This dedicated one-connection pool keeps the session lock through
             // pending-migration discovery and every migration transaction.
@@ -46,8 +48,8 @@ async fn run() -> anyhow::Result<()> {
         .await;
         // Closing the session releases the lock on success and on failure.
         let closed = db.close().await;
-        result?;
-        closed?;
+        result.inspect_err(|_| service_failed("migration"))?;
+        closed.inspect_err(|_| service_failed("migration_disconnect"))?;
         tracing::info!("database migrations complete");
     }
     if migrate_only {
@@ -56,6 +58,7 @@ async fn run() -> anyhow::Result<()> {
     let state = AppState::connect(config).await?;
     let listener = tokio::net::TcpListener::bind(state.config.bind)
         .await
+        .inspect_err(|_| service_failed("listen"))
         .with_context(|| format!("Cannot bind API to {}. Stop the previous API/dev process or configure a different API_BIND.", state.config.bind))?;
     tracing::info!(address = %listener.local_addr()?, "API listening");
     let shutdown = state.shutdown.clone();
@@ -96,6 +99,15 @@ async fn run() -> anyhow::Result<()> {
         tokio::select! {_=tokio::signal::ctrl_c()=>{},_=terminate=>{},_=lease=>{}}
         shutdown.cancel();
     })
-    .await?;
+    .await
+    .inspect_err(|_| service_failed("serve"))?;
     Ok(())
+}
+
+fn service_failed(stage: &'static str) {
+    tracing::error!(
+        event = "api.service.failed",
+        stage,
+        "API lifecycle operation failed"
+    );
 }

@@ -143,31 +143,98 @@ pub async fn context(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use tracing::Instrument;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
-    let context = opentelemetry::global::get_text_map_propagator(|p| {
-        p.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
-    });
-    let _ = tracing::Span::current().set_parent(context);
     let route = request
         .extensions()
         .get::<axum::extract::MatchedPath>()
         .map_or("unmatched", |p| p.as_str())
         .to_owned();
-    let method = request.method().to_string();
-    let start = std::time::Instant::now();
-    let response = next.run(request).await;
-    let attributes = [
-        opentelemetry::KeyValue::new("http.route", route),
-        opentelemetry::KeyValue::new("http.request.method", method),
-        opentelemetry::KeyValue::new(
-            "http.response.status_code",
-            i64::from(response.status().as_u16()),
-        ),
-    ];
-    let metrics = http_metrics();
-    metrics.0.add(1, &attributes);
-    metrics.1.record(start.elapsed().as_secs_f64(), &attributes);
-    response
+    let method = match request.method().as_str() {
+        method @ ("GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "CONNECT" | "OPTIONS" | "TRACE"
+        | "PATCH") => method,
+        _ => "_OTHER",
+    }
+    .to_owned();
+    let span = tracing::info_span!(
+        "http_request",
+        otel.kind = "server",
+        http.route = route.as_str(),
+        http.request.method = method.as_str(),
+        http.response.status_code = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+    );
+    let parent = opentelemetry::global::get_text_map_propagator(|p| {
+        p.extract(&opentelemetry_http::HeaderExtractor(request.headers()))
+    });
+    let _ = span.set_parent(parent);
+    async move {
+        let start = std::time::Instant::now();
+        let response = next.run(request).await;
+        let elapsed = start.elapsed();
+        let status = response.status().as_u16();
+        let span = tracing::Span::current();
+        span.record("http.response.status_code", status);
+        if response.status().is_server_error() {
+            span.record("otel.status_code", "ERROR");
+            let principal = response.extensions().get::<crate::auth::Principal>();
+            let reason = response
+                .extensions()
+                .get::<crate::error::FailureCode>()
+                .map_or("server_error", |code| code.0);
+            let latency_ms = elapsed.as_millis() as u64;
+            let account_id = principal.map(|p| tracing::field::display(p.account_id));
+            let device_id = principal.map(|p| tracing::field::display(p.device_id));
+            let session_id = principal.map(|p| tracing::field::display(p.session_id));
+            if status == 503 {
+                tracing::warn!(
+                    event = "http.request.dependency_unavailable",
+                    method,
+                    path = route,
+                    status,
+                    reason,
+                    latency_ms,
+                    account_id,
+                    device_id,
+                    session_id,
+                    "HTTP dependency unavailable"
+                );
+            } else {
+                tracing::error!(
+                    event = "http.request.failed",
+                    method,
+                    path = route,
+                    status,
+                    reason,
+                    latency_ms,
+                    account_id,
+                    device_id,
+                    session_id,
+                    "HTTP request failed"
+                );
+            }
+        }
+        let attributes = [
+            opentelemetry::KeyValue::new("http.route", route),
+            opentelemetry::KeyValue::new("http.request.method", method),
+            opentelemetry::KeyValue::new("http.response.status_code", i64::from(status)),
+        ];
+        let metrics = http_metrics();
+        metrics.0.add(1, &attributes);
+        metrics.1.record(elapsed.as_secs_f64(), &attributes);
+        response
+    }
+    .instrument(span)
+    .await
+}
+
+/// Poll a response stream under its originating span after the handler returns.
+pub(crate) fn instrument_stream<S: futures_util::Stream>(
+    stream: S,
+    span: tracing::Span,
+) -> impl futures_util::Stream<Item = S::Item> {
+    let mut stream = Box::pin(stream);
+    futures_util::stream::poll_fn(move |cx| span.in_scope(|| stream.as_mut().poll_next(cx)))
 }
 
 fn http_metrics() -> &'static (
@@ -203,6 +270,151 @@ mod tests {
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct LogCapture(Arc<Mutex<Vec<opentelemetry_sdk::logs::SdkLogRecord>>>);
+
+    impl opentelemetry_sdk::logs::LogProcessor for LogCapture {
+        fn emit(
+            &self,
+            record: &mut opentelemetry_sdk::logs::SdkLogRecord,
+            _: &opentelemetry::InstrumentationScope,
+        ) {
+            self.0.lock().unwrap().push(record.clone());
+        }
+
+        fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn request_and_stream_failures_keep_safe_fields_and_trace_context() {
+        use axum::{
+            Router,
+            body::Body,
+            http::Request,
+            response::sse::{Event, Sse},
+            routing::get,
+        };
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        use tracing::instrument::WithSubscriber;
+
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = output.clone();
+        let capture = LogCapture::default();
+        let logs = opentelemetry_sdk::logs::SdkLoggerProvider::builder()
+            .with_log_processor(capture.clone())
+            .build();
+        let traces = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
+        opentelemetry::global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+        );
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_writer(move || Capture(writer.clone())),
+            )
+            .with(tracing_opentelemetry::layer().with_tracer(traces.tracer("test")))
+            .with(opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logs));
+        let dispatch = tracing::Dispatch::new(subscriber);
+        let app = Router::new()
+            .route(
+                "/good",
+                get(|| async { axum::http::StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/example/{id}",
+                get(|| async {
+                    crate::error::ApiError::Internal(anyhow::anyhow!("private database details"))
+                }),
+            )
+            .route(
+                "/unavailable",
+                get(|| async { crate::error::ApiError::StorageUnavailable }),
+            )
+            .route("/events", get(|| async {
+                let stream = async_stream::stream! {
+                    yield Ok::<_, std::convert::Infallible>(Event::default().data("connected"));
+                    tracing::warn!(event = "test.stream.failed", "Stream failed after the first event");
+                };
+                Sse::new(instrument_stream(stream, tracing::Span::current()))
+            }))
+            .layer(axum::middleware::from_fn(context));
+        for (path, status) in [
+            ("/good", 204),
+            ("/example/private-id?token=private-token", 500),
+            ("/unavailable", 503),
+            ("/events", 200),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header(
+                            "traceparent",
+                            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                        )
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .with_subscriber(dispatch.clone())
+                .await
+                .unwrap();
+            assert_eq!(response.status().as_u16(), status);
+            if path == "/events" {
+                assert!(
+                    !String::from_utf8_lossy(&output.lock().unwrap())
+                        .contains("test.stream.failed")
+                );
+                let body = response
+                    .into_body()
+                    .collect()
+                    .with_subscriber(dispatch.clone())
+                    .await
+                    .unwrap();
+                assert_eq!(body.to_bytes(), "data: connected\n\n");
+            }
+        }
+        let output = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        let logs: Vec<serde_json::Value> = output
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|log| log["fields"]["event"].is_string())
+            .collect();
+        assert_eq!(logs.len(), 3, "{output}");
+        assert_eq!(logs[0]["fields"]["event"], "http.request.failed");
+        assert_eq!(logs[0]["fields"]["path"], "/example/{id}");
+        assert_eq!(logs[0]["fields"]["reason"], "internal_error");
+        assert_eq!(
+            logs[1]["fields"]["event"],
+            "http.request.dependency_unavailable"
+        );
+        assert_eq!(logs[1]["fields"]["reason"], "storage_unavailable");
+        assert_eq!(logs[2]["fields"]["event"], "test.stream.failed");
+        assert!(!output.contains("private"));
+        let exported = capture.0.lock().unwrap();
+        let request_logs = exported
+            .iter()
+            .filter(|record| {
+                record
+                    .attributes_iter()
+                    .any(|(key, _)| key.as_str() == "event")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(request_logs.len(), 3);
+        for record in request_logs {
+            let context = record.trace_context().unwrap();
+            assert_eq!(
+                context.trace_id.to_string(),
+                "4bf92f3577b34da6a3ce929d0e0e4736"
+            );
+            assert_ne!(context.span_id.to_string(), "00f067aa0ba902b7");
         }
     }
 

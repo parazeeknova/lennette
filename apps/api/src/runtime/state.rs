@@ -37,12 +37,16 @@ impl AppState {
             .min_connections(1)
             .connect_timeout(Duration::from_secs(10))
             .sqlx_logging(false);
-        let db = Database::connect(options).await?;
-        let redis = Builder::from_config(fred::types::config::Config::from_url(
-            config.redis_url.expose_secret(),
-        )?)
-        .build()?;
-        redis.init().await?;
+        let db = Database::connect(options)
+            .await
+            .inspect_err(|_| dependency_failed("database"))?;
+        let redis = fred::types::config::Config::from_url(config.redis_url.expose_secret())
+            .and_then(|config| Builder::from_config(config).build())
+            .inspect_err(|_| dependency_failed("redis"))?;
+        redis
+            .init()
+            .await
+            .inspect_err(|_| dependency_failed("redis"))?;
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(30))
@@ -50,12 +54,14 @@ impl AppState {
             .pool_max_idle_per_host(8)
             .user_agent("Lennette-managed/0.1")
             .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+            .build()
+            .inspect_err(|_| dependency_failed("http_client"))?;
         let attachments = config
             .r2
             .as_ref()
             .map(crate::storage::connect)
-            .transpose()?;
+            .transpose()
+            .inspect_err(|_| dependency_failed("object_storage"))?;
         let shutdown = tokio_util::sync::CancellationToken::new();
         let workspace_publisher =
             crate::workspace::realtime::Publisher::new(redis.clone(), shutdown.clone());
@@ -81,4 +87,12 @@ impl AppState {
             Ok(())
         }
     }
+}
+
+fn dependency_failed(dependency: &'static str) {
+    tracing::error!(
+        event = "api.dependency.init_failed",
+        dependency,
+        "API dependency initialization failed"
+    );
 }

@@ -20,7 +20,6 @@ use tower_http::{
     cors::CorsLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     sensitive_headers::SetSensitiveRequestHeadersLayer,
-    trace::TraceLayer,
 };
 
 pub fn router(state: AppState) -> Router {
@@ -65,32 +64,75 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/exchange",post(auth::exchange)).route("/auth/refresh",post(auth::refresh))
         .route("/billing/webhook",post(billing::webhook))
         .route("/catalog",get(||async{Json(json!({"plans":[plans::STANDARD,plans::PLUS],"models":plans::models(),"api_version":1,"supports_extended_reasoning_effort":true}))}));
-    Router::new().nest("/v1",api)
-        .route("/health/live",get(||async{StatusCode::NO_CONTENT})).route("/health/ready",get(ready))
-        .layer(DefaultBodyLimit::max(4*1024*1024))
-        .layer(middleware::from_fn_with_state(state.clone(), crate::security::http::protect))
-        .layer(ServiceBuilder::new().layer(tower::limit::ConcurrencyLimitLayer::new(64))
-            .layer(SetRequestIdLayer::new(header::HeaderName::from_static("x-request-id"),MakeRequestUuid))
-            .layer(SetSensitiveRequestHeadersLayer::new([header::AUTHORIZATION,header::COOKIE]))
-            .layer(TraceLayer::new_for_http().on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::DEBUG)).make_span_with(|request:&axum::http::Request<axum::body::Body>|tracing::info_span!("http_request",otel.kind="server",method=%request.method(),path=request.uri().path())))
-            .layer(middleware::from_fn(crate::telemetry::context))
-            .layer(PropagateRequestIdLayer::new(header::HeaderName::from_static("x-request-id")))
-            .layer(CorsLayer::new().allow_credentials(true).allow_origin(state.config.website_url.origin().ascii_serialization().parse::<HeaderValue>().expect("validated website origin")).allow_headers([header::AUTHORIZATION,header::CONTENT_TYPE,header::HeaderName::from_static("x-delete-confirmation")]).allow_methods([axum::http::Method::GET,axum::http::Method::POST,axum::http::Method::DELETE])))
+    Router::new()
+        .nest("/v1", api)
+        .route("/health/live", get(|| async { StatusCode::NO_CONTENT }))
+        .route("/health/ready", get(ready))
+        .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::security::http::protect,
+        ))
+        .layer(
+            ServiceBuilder::new()
+                .layer(tower::limit::ConcurrencyLimitLayer::new(64))
+                .layer(SetRequestIdLayer::new(
+                    header::HeaderName::from_static("x-request-id"),
+                    MakeRequestUuid,
+                ))
+                .layer(SetSensitiveRequestHeadersLayer::new([
+                    header::AUTHORIZATION,
+                    header::COOKIE,
+                ]))
+                .layer(middleware::from_fn(crate::telemetry::context))
+                .layer(PropagateRequestIdLayer::new(
+                    header::HeaderName::from_static("x-request-id"),
+                ))
+                .layer(
+                    CorsLayer::new()
+                        .allow_credentials(true)
+                        .allow_origin(
+                            state
+                                .config
+                                .website_url
+                                .origin()
+                                .ascii_serialization()
+                                .parse::<HeaderValue>()
+                                .expect("validated website origin"),
+                        )
+                        .allow_headers([
+                            header::AUTHORIZATION,
+                            header::CONTENT_TYPE,
+                            header::HeaderName::from_static("x-delete-confirmation"),
+                        ])
+                        .allow_methods([
+                            axum::http::Method::GET,
+                            axum::http::Method::POST,
+                            axum::http::Method::DELETE,
+                        ]),
+                ),
+        )
         .with_state(state)
 }
-async fn ready(State(state): State<AppState>) -> StatusCode {
+async fn ready(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
     use fred::prelude::*;
-    if state
+    let database = state
         .db
         .execute_unprepared("SELECT 1 FROM accounts LIMIT 1; SELECT 1 FROM billing_holds LIMIT 1; SELECT 1 FROM object_uploads LIMIT 1; SELECT 1 FROM attachment_refs LIMIT 1")
-        .await
-        .is_err()
-        || state.redis.ping::<String>(None).await.is_err()
-    {
-        StatusCode::SERVICE_UNAVAILABLE
+        .await;
+    let reason = if database.is_err() {
+        "database"
+    } else if state.redis.ping::<String>(None).await.is_err() {
+        "redis"
     } else {
-        StatusCode::NO_CONTENT
-    }
+        return StatusCode::NO_CONTENT.into_response();
+    };
+    let mut response = StatusCode::SERVICE_UNAVAILABLE.into_response();
+    response
+        .extensions_mut()
+        .insert(crate::error::FailureCode(reason));
+    response
 }
 async fn me(
     State(state): State<AppState>,

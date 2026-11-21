@@ -522,12 +522,20 @@ pub fn dictation_failed(account_id: Uuid, audio_secs: i64, status: Option<u16>) 
 
 /// One upstream attempt failed (primary or fallback). Each attempt settles
 /// its own reservation, so this pairs with billing records.
-pub fn chat_upstream_failed(account_id: Uuid, provider: &str, model: &str) {
+pub fn chat_upstream_failed(
+    account_id: Uuid,
+    provider: &str,
+    model: &str,
+    reason: &'static str,
+    status: Option<u16>,
+) {
     tracing::warn!(
         event = "ai.chat.upstream_failed",
         account_id = %account_id,
         provider,
         model,
+        reason,
+        status,
         "managed chat upstream attempt failed"
     );
 }
@@ -814,10 +822,8 @@ pub fn cleanup_completed(jobs: u64, reclaimed_bytes: u64) {
 // HTTP outcome (protected routes; runs inside the auth guard)
 // ---------------------------------------------------------------------------
 
-/// Non-successful protected-request outcome with account context. 5xx is an
-/// error, 429 and 503 warn (rate pressure; dependency or config failure),
-/// 402 is business info (subscription or quota exhausted). Routine 4xx stays
-/// at debug: per-status rates are already available as `http.server.*` metrics.
+/// Protected client errors with account context. Server failures are logged
+/// by the HTTP telemetry middleware for both public and protected routes.
 pub fn protected_outcome(
     method: &str,
     path: &str,
@@ -827,26 +833,9 @@ pub fn protected_outcome(
     session_id: Uuid,
     latency_ms: u64,
 ) {
-    if status >= 500 && status != 503 {
-        tracing::error!(
-            event = "http.request.failed",
-            method,
-            path,
-            status,
-            account_id = %account_id,
-            device_id = %device_id,
-            session_id = %session_id,
-            latency_ms,
-            "protected request failed"
-        );
-    } else if status == 429 || status == 503 {
-        let event = if status == 429 {
-            "http.request.rate_limited"
-        } else {
-            "http.request.dependency_unavailable"
-        };
+    if status == 429 {
         tracing::warn!(
-            event,
+            event = "http.request.rate_limited",
             method,
             path,
             status,
@@ -854,7 +843,7 @@ pub fn protected_outcome(
             device_id = %device_id,
             session_id = %session_id,
             latency_ms,
-            "protected request blocked or dependency unavailable"
+            "protected request rate limited"
         );
     } else if status == 402 {
         tracing::info!(
@@ -868,7 +857,7 @@ pub fn protected_outcome(
             latency_ms,
             "protected request blocked by subscription or quota"
         );
-    } else {
+    } else if (400..500).contains(&status) {
         tracing::debug!(
             event = "http.request.client_error",
             method,

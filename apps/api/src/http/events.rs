@@ -30,7 +30,13 @@ impl Drop for StreamLease {
         // Response bodies are dropped on navigation/disconnect, without polling
         // the generator to completion. Release capacity on that path too.
         tokio::spawn(async move {
-            let _: std::result::Result<i64, _> = redis.zrem(key, token).await;
+            if redis.zrem::<i64, _, _>(key, token).await.is_err() {
+                tracing::warn!(
+                    event = "account.events.lease_release_failed",
+                    dependency = "redis",
+                    "Account event stream lease will expire automatically"
+                );
+            }
         });
     }
 }
@@ -59,7 +65,11 @@ pub fn start(state: AppState) {
                 break;
             }
             if result.is_err() {
-                tracing::warn!("account event listener disconnected; reconnecting");
+                tracing::warn!(
+                    event = "account.events.listener_failed",
+                    dependency = "database",
+                    "Account event listener disconnected; reconnecting"
+                );
             }
             tokio::select! { _ = state.shutdown.cancelled() => break, _ = tokio::time::sleep(Duration::from_secs(2)) => {} }
         }
@@ -93,11 +103,21 @@ pub async fn stream(
             tokio::select! {
                 _ = state.shutdown.cancelled() => break,
                 _ = timer.tick() => {
-                    if auth::browser::authenticate_cookie(&state,&headers,false).await.is_err() {
+                    if let Err(error) = auth::browser::authenticate_cookie(&state,&headers,false).await {
+                        if !matches!(error, ApiError::Unauthorized) {
+                            tracing::warn!(event = "account.events.auth_refresh_failed", session_id = %p.session_id, reason = error.diagnostic_code(), "Cannot revalidate account event stream session");
+                        }
                         yield Ok(Event::default().event("expired").data("sign_in_required")); break;
                     }
                     let renewed: std::result::Result<i64,_> = state.redis.eval("if redis.call('ZSCORE',KEYS[1],ARGV[1]) then redis.call('ZADD',KEYS[1],ARGV[2],ARGV[1]); redis.call('EXPIRE',KEYS[1],45); return 1 else return 0 end",vec![key.clone()],vec![lease.clone(),(chrono::Utc::now().timestamp()+45).to_string()]).await;
-                    if !matches!(renewed,Ok(1)) { break; }
+                    match renewed {
+                        Ok(1) => {}
+                        Ok(_) => break,
+                        Err(_) => {
+                            tracing::warn!(event = "account.events.lease_renewal_failed", session_id = %p.session_id, dependency = "redis", "Could not renew account event stream lease");
+                            break;
+                        }
+                    }
                 }
                 event = receiver.recv() => {
                     match event {

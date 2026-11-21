@@ -20,14 +20,7 @@ async fn logs_metrics_and_traces_reach_openobserve() {
         )
         .layer(axum::middleware::from_fn(
             lennette_server::telemetry::context,
-        ))
-        .layer(
-            tower_http::trace::TraceLayer::new_for_http().make_span_with(
-                |_: &axum::http::Request<axum::body::Body>| {
-                    tracing::info_span!("http_request", otel.kind = "server")
-                },
-            ),
-        );
+        ));
     let response = app
         .oneshot(
             axum::http::Request::builder()
